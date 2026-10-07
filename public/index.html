@@ -36,7 +36,7 @@
     <div class="eyebrow">BYTE BACK · 1단계 피해 확인</div>
     <h1>점령된 자료실</h1>
     <p>지금은 보호 장치가 없는 상태입니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
-    <div class="notice">로그인하지 않은 방문자도 자료를 볼 수 있습니다. 공개 범위를 확인하고, 다음 제작 단계에서 접근을 차례로 막아 주세요.</div>
+    <div class="notice">이제 서버가 로그인 토큰을 확인한 요청에만 자료를 보냅니다. 로그인은 신원 확인일 뿐이며, 다른 사람 자료 접근은 다음 단계에서 막습니다.</div>
     <section class="auth" aria-labelledby="auth-title">
       <h2 id="auth-title">로그인</h2>
       <p id="auth-status" class="status" aria-live="polite">로그인 상태를 확인하는 중입니다.</p>
@@ -78,8 +78,46 @@
       return `로그인에 실패했습니다: ${error.message}`;
     };
 
+    const list = document.querySelector('#notes');
+    const showListMessage = message => {
+      const item = document.createElement('li');
+      item.textContent = message;
+      list.replaceChildren(item);
+    };
+    let notesRequest = 0;
+    async function loadNotes(accessToken) {
+      const current = ++notesRequest;
+      if (!accessToken) {
+        showListMessage('로그인하면 가상 메모가 보입니다.');
+        return;
+      }
+      showListMessage('가상 자료를 불러오는 중입니다.');
+      try {
+        const response = await fetch('/api/notes', {
+          cache: 'no-store', headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (current !== notesRequest) return;
+        if (response.status === 401 || response.status === 403) throw new Error('로그인을 확인할 수 없습니다. 다시 로그인해 주세요.');
+        if (!response.ok) throw new Error('자료를 읽을 수 없습니다.');
+        const data = await response.json();
+        if (!Array.isArray(data.notes)) throw new Error('자료 형식이 맞지 않습니다.');
+        list.replaceChildren(...data.notes.map(note => {
+          const item = document.createElement('li');
+          const title = document.createElement('strong');
+          const content = document.createElement('span');
+          title.textContent = note.title;
+          content.textContent = note.content;
+          item.append(title, content);
+          return item;
+        }));
+      } catch (error) {
+        if (current === notesRequest) showListMessage(error.message);
+      }
+    }
+
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || !window.supabase?.createClient) {
       status.textContent = '로그인 설정이 아직 없습니다. Project URL과 publishable key를 확인해 주세요.';
+      loadNotes(null);
     } else {
       const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
       const render = session => {
@@ -89,7 +127,10 @@
         loginForm.hidden = Boolean(user);
         logoutForm.hidden = !user;
       };
-      client.auth.onAuthStateChange((_event, session) => render(session));
+      client.auth.onAuthStateChange((_event, session) => {
+        render(session);
+        loadNotes(session?.access_token);
+      });
 
       loginForm.addEventListener('submit', async event => {
         event.preventDefault();
@@ -108,28 +149,6 @@
         const { error } = await client.auth.signOut();
         if (error) showError(`로그아웃에 실패했습니다: ${error.message}`);
       });
-    }
-  </script>
-  <script type="module">
-    const list = document.querySelector('#notes');
-    try {
-      const response = await fetch('/api/notes', { cache: 'no-store' });
-      if (!response.ok) throw new Error('자료를 읽을 수 없습니다.');
-      const data = await response.json();
-      if (!Array.isArray(data.notes)) throw new Error('자료 형식이 맞지 않습니다.');
-      list.replaceChildren(...data.notes.map(note => {
-        const item = document.createElement('li');
-        const title = document.createElement('strong');
-        const content = document.createElement('span');
-        title.textContent = note.title;
-        content.textContent = note.content;
-        item.append(title, content);
-        return item;
-      }));
-    } catch (error) {
-      const item = document.createElement('li');
-      item.textContent = error.message;
-      list.replaceChildren(item);
     }
   </script>
 </body>
