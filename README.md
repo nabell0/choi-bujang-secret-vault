@@ -20,7 +20,7 @@
 
 ## 2단계: 자료를 코드 밖으로 옮겼습니다
 
-가상 메모 네 건은 이제 저장소가 아니라 학습용 Supabase `notes` 테이블에 있습니다. 테이블은 RLS가 켜져 있고 `anon`·`authenticated`에는 읽기 권한이 없습니다. 테이블을 만드는 SQL(`supabase/*.local.sql`)은 메모 본문이 들어 있어 Git에 올리지 않습니다.
+가상 메모 네 건은 이제 저장소가 아니라 학습용 Supabase `notes` 테이블에 있습니다. 테이블은 RLS가 켜져 있고 `anon`·`authenticated`에는 읽기 권한이 없습니다(4단계 RLS SQL이 `authenticated`에 본인 행 권한을 줬다가, 5단계 SQL이 다시 모두 거둡니다). 테이블을 만드는 SQL(`supabase/*.local.sql`)은 메모 본문이 들어 있어 Git에 올리지 않습니다.
 
 화면은 `/api/notes` 서버 함수를 거쳐 메모를 읽습니다. 함수는 Vercel 프로젝트 **Settings → Environment Variables**에 학생이 직접 넣은 `SUPABASE_URL`과 서버 전용 `SUPABASE_SECRET_KEY`만 사용하며, 키는 브라우저 파일·응답·로그에 나오지 않습니다. 정적 파일 `/data.json`은 더 이상 만들지 않아 404가 됩니다. 모든 응답에는 `X-Content-Type-Options: nosniff` 헤더가 붙습니다(`vercel.json`).
 
@@ -44,7 +44,18 @@
   1. `supabase/step4-owners.sql`: 기존 가상 메모 네 건을 A 소유로 연결하고, B 소유 시험 메모(`b4000000-0000-4000-8000-000000000001`)를 만듭니다.
   2. `supabase/step4-rls.sql`: `notes`의 권한을 모두 회수한 뒤 `authenticated`에만 SELECT·INSERT·UPDATE·DELETE를 주고, 네 정책 모두 `auth.uid() = owner_id`일 때만 허용합니다. 적용 전후 권한 대조표가 나옵니다.
 
-**남은 약점:** 앱 API는 RLS를 건너뛰는 서버 전용 키로 DB에 접근하므로, A/B 분리는 API의 소유자 검사에 달려 있습니다. RLS는 공개 키와 로그인 토큰으로 DB에 직접 요청할 때의 두 번째 방어선입니다. 요청 횟수 제한은 아직 없습니다.
+**남은 약점(4단계 시점):** 앱 API는 RLS를 건너뛰는 서버 전용 키로 DB에 접근하므로, A/B 분리는 API의 소유자 검사에 달려 있습니다. 4단계 RLS SQL을 적용하면 로그인 토큰과 공개 키로 원본 자료 API에서 자기 행을 직접 다룰 수 있는 길이 열립니다. 5단계에서 닫습니다.
+
+## 5단계: 자료 요청을 서버 한곳으로 모았습니다
+
+- 브라우저는 메모를 Supabase에서 직접 읽거나 고치지 않습니다. 메모 읽기·추가·수정·삭제는 모두 `/api/notes` 서버 함수를 거치고, 브라우저가 Supabase SDK로 부르는 것은 로그인·로그아웃(`client.auth`)뿐입니다.
+- 화면 파일에 Supabase Project URL과 공개 키를 적지 않습니다. 화면은 `GET /api/auth-config`에서 Vercel 환경변수 `SUPABASE_URL`·`SUPABASE_PUBLISHABLE_KEY`를 런타임에 받아 로그인 SDK를 시작합니다. 이 함수는 비밀 키(`sb_secret_…`, `service_role`)가 잘못 들어 있으면 보내지 않습니다. 공개 키는 여전히 런타임에 브라우저로 전달되므로 비밀은 아니며, 정적 파일·브라우저 묶음에서 검색되지 않게 한 것입니다.
+- `supabase/step5-revoke-direct.sql`: `notes` 테이블(과 그 번호 시퀀스)에서 `PUBLIC`·`anon`·`authenticated`의 직접 권한을 모두 거둡니다. RLS와 4단계 본인 행 정책은 남겨 둡니다. 적용 전후 권한 대조표(역할 4개 × 권한 7개)가 나오며, 서버 함수가 쓰는 `service_role`은 그대로여야 합니다.
+- 원본 자료 API 주소는 `aleph.config.json`의 `originalApiUrl`(`https://kcxnmaxipzlxdxwvpupv.supabase.co/rest/v1/notes`)입니다. 위 SQL 적용 뒤에는 공개 키로 직접 불러도 `permission denied`로 거부되어야 합니다.
+- 빌드는 `aleph.config.json`의 `allowedRoutes`를 `/aleph.json`에도 기록합니다. 경로가 비었거나 `메서드 /api/경로` 형식이 아니면 빌드가 실패합니다.
+- Vercel **Settings → Environment Variables**에 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`가 있어야 합니다. 값은 학생이 그 화면에 직접 넣습니다.
+
+**남은 약점:** 요청 횟수 제한이 없습니다. 공개 키는 `/api/auth-config`로 누구나 받을 수 있으므로, 원본 자료 API 보호는 DB 권한 회수에 달려 있습니다. 옛 커밋과 옛 배포에는 화면 코드에 적었던 공개 키가 남아 있습니다.
 
 ### 다시 실행하는 방법
 
@@ -55,7 +66,7 @@ npm run test:r5
 npm run bundle
 ```
 
-`npm run bundle`은 커밋되지 않은 파일이 없고, Git에서 제외된 `bundle-notes.json`(이번 단계 설명)이 있을 때만 `artifacts/submission.json`을 만듭니다. 공격 점검은 `aleph.config.json`의 `publicAppUrl`에 실제로 요청을 보낸 결과만 기록하며 심판 판정이 아닙니다. 학생 프로젝트의 서명 키가 필요한 만료·다른 서비스 토큰 점검과, A·B의 실제 로그인 토큰이 필요한 타인 메모 접근·소유자 변경 점검은 미실행으로 남깁니다. `npm run test:package`의 함수 기준표 시험은 `api/notes.js`가 추가되어 실패합니다.
+`npm run bundle`은 커밋되지 않은 파일이 없고, Git에서 제외된 `bundle-notes.json`(이번 단계 설명)이 있을 때만 `artifacts/submission.json`을 만듭니다. 공격 점검은 `aleph.config.json`의 `publicAppUrl`에 실제로 요청을 보낸 결과만 기록하며 심판 판정이 아닙니다. 학생 프로젝트의 서명 키가 필요한 만료·다른 서비스 토큰 점검과, A·B·시험 계정의 실제 로그인 토큰이 필요한 타인 메모 접근·소유자 변경·원본 API 토큰 직접 호출 점검은 미실행으로 남깁니다. 원본 API 직접 점검은 배포의 `/api/auth-config`에서 공개 키를 받아 요청만 보내고, 키는 기록하지 않습니다. `npm run test:package`의 함수 기준표 시험은 `api/notes.js`가 추가되어 실패합니다.
 
 ## 가상 메모 노출 확인 절차
 
@@ -87,7 +98,7 @@ npm run bundle
 
 옛 공개 커밋이나 옛 배포가 남아 있는 한 과거 노출은 해소되지 않았습니다. 최신 파일 검색이 0건이어도 "노출 해소"로 기록하지 마세요. 그 기간에 이미 복제·캐시된 사본도 되돌릴 수 없습니다.
 
-### 확인 기록 (2026-10-07, 3단계 저장점 배포 `070f087` 기준)
+### 확인 기록 (2026-10-07, 4단계 저장점 배포 `d51e699` 기준)
 
 **검색 결과**
 
@@ -100,6 +111,7 @@ npm run bundle
 
 - 2단계의 "비로그인으로 `/api/notes`를 읽을 수 있음"은 3단계에서 막았습니다. 배포에서 토큰 없는 GET·POST `/api/notes`와 GET·PUT·DELETE `/api/notes/:id`가 모두 401 JSON(`LOGIN_REQUIRED`)으로 거부되는 것을 확인했습니다.
 - 3단계의 소유자 검사 부재는 4단계 코드에서 고쳤습니다. 로컬 가짜 DB 시험에서는 상대 메모 접근과 소유자 변경이 403으로 거부됐지만, 실제 A·B 계정으로 배포를 확인한 기록은 아직 없습니다.
+- 학습 DB SQL(3·4·5단계)을 실제로 실행했는지는 이 기록에 확인되지 않았습니다. 5단계 원본 API 직접 점검 결과는 `npm run bundle`의 `artifacts/submission.json`에 남습니다.
 - 요청 횟수 제한은 아직 없습니다.
 
 ## 다음 단계의 코딩 도구에 전달할 규칙

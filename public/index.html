@@ -41,7 +41,7 @@
 </head>
 <body>
   <main>
-    <div class="eyebrow">BYTE BACK · 4단계 내 자료만</div>
+    <div class="eyebrow">BYTE BACK · 5단계 서버 한곳으로</div>
     <h1>점령된 자료실</h1>
     <p>로그인한 사람은 자기 가상 메모만 보고 추가·수정·삭제할 수 있습니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
     <div class="notice">이제 서버가 로그인 토큰을 확인한 요청에만 자료를 보냅니다. 로그인은 신원 확인일 뿐이며, 다른 사람 자료 접근은 다음 단계에서 막습니다.</div>
@@ -71,10 +71,7 @@
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
-    // Only the public Project URL and publishable key belong here. Never put a secret key in browser files.
-    const SUPABASE_URL = 'https://kcxnmaxipzlxdxwvpupv.supabase.co';
-    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_h5difiorV3NhLy1USV8YmA_1cxVTjWk';
-
+    // No Supabase URL or key is written in this file; login settings come from /api/auth-config at runtime.
     const status = document.querySelector('#auth-status');
     const loginForm = document.querySelector('#login-form');
     const logoutForm = document.querySelector('#logout-form');
@@ -215,11 +212,23 @@
       }
     });
 
-    if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || !window.supabase?.createClient) {
-      status.textContent = '로그인 설정이 아직 없습니다. Project URL과 publishable key를 확인해 주세요.';
+    async function loadAuthConfig() {
+      try {
+        const response = await fetch('/api/auth-config', { cache: 'no-store' });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || typeof data?.supabaseUrl !== 'string' || typeof data?.publishableKey !== 'string') return null;
+        return data;
+      } catch {
+        return null;
+      }
+    }
+
+    const authConfig = await loadAuthConfig();
+    if (!authConfig || !window.supabase?.createClient) {
+      status.textContent = '로그인 설정을 불러오지 못했습니다. 잠시 뒤 새로고침해 주세요.';
       loadNotes(null);
     } else {
-      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+      const client = window.supabase.createClient(authConfig.supabaseUrl, authConfig.publishableKey);
       const render = session => {
         const user = session?.user;
         document.body.dataset.auth = user ? 'signed-in' : 'signed-out';

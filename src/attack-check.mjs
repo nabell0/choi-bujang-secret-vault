@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -14,6 +14,7 @@ export async function runAttackChecks(config) {
   }
   if (config.step === 3) return runStep3Checks(app, config);
   if (config.step === 4) return runStep4Checks(app, config);
+  if (config.step === 5) return runStep5Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -123,5 +124,74 @@ async function runStep4Checks(app, config) {
     { attackId: 'other_user_note_update', expected: 'A가 B 메모 ID로 PUT하면 403 JSON 오류로 거부되고 B 메모가 그대로임', observed: notRun },
     { attackId: 'other_user_note_delete', expected: 'A가 B 메모 ID로 DELETE하면 403 JSON 오류로 거부되고 B 메모가 남음', observed: notRun },
     { attackId: 'owner_change', expected: '본문에 상대 owner_id를 넣은 POST·PUT이 403 JSON 오류로 거부됨', observed: notRun },
+  ];
+}
+
+// The public key is fetched at runtime only to send the probe; it is never stored or reported.
+async function runtimePublicKey(app) {
+  try {
+    const response = await fetch(new URL('/api/auth-config', app), {
+      redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000),
+    });
+    const key = response.ok ? (await response.json())?.publishableKey : null;
+    return typeof key === 'string' && key ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+async function directOriginal(config, key, method, search, body) {
+  try {
+    const url = new URL(config.originalApiUrl);
+    url.search = search;
+    const response = await fetch(url, {
+      method, headers: { apikey: key, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined, redirect: 'error', signal: AbortSignal.timeout(10000),
+    });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // Empty bodies (e.g. 204) carry no rows or error code.
+    }
+    return { status: response.status, code: typeof data?.code === 'string' ? data.code : null,
+      rows: Array.isArray(data) ? data.length : null };
+  } catch {
+    return null;
+  }
+}
+
+async function runStep5Checks(app, config) {
+  const earlier = await runStep4Checks(app, config);
+  const key = await runtimePublicKey(app);
+  const [read, update, pages] = await Promise.all([
+    key ? directOriginal(config, key, 'GET', '?select=id') : null,
+    key ? directOriginal(config, key, 'PATCH', '?id=eq.00000000-0000-4000-8000-000000000000', { title: '직접 수정 시도' }) : null,
+    Promise.all(['/', '/index.html'].map(async path => {
+      try {
+        const response = await fetch(new URL(path, app), { redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+        return await response.text();
+      } catch {
+        return null;
+      }
+    })),
+  ]);
+  const describe = result => (result
+    ? `HTTP ${result.status}, 오류 코드 ${result.code ?? '없음'}, 받은 행 ${result.rows ?? '없음'}`
+    : '요청 실패');
+  const noKey = '미실행: /api/auth-config에서 공개 키를 받지 못해 보내지 않음';
+  const fetched = pages.filter(text => typeof text === 'string');
+  const keyHits = fetched.filter(text => /sb_publishable_|sb_secret_|eyJ[\w-]{10,}\.eyJ[\w-]{10,}/u.test(text)).length;
+  const markerHits = fetched.filter(text => text.includes(config.sampleMarker)).length;
+  return [
+    ...earlier,
+    { attackId: 'original_api_direct_read', expected: '공개 키로 원본 자료 API를 직접 GET하면 권한 오류로 거부되고 메모 0건',
+      observed: key ? `원본 API 직접 GET(공개 키, 토큰 없음): ${describe(read)}` : noKey },
+    { attackId: 'original_api_direct_update', expected: '공개 키로 원본 자료 API를 직접 PATCH하면 권한 오류로 거부됨(없는 ID로만 시도)',
+      observed: key ? `원본 API 직접 PATCH(공개 키, 토큰 없음, 없는 ID): ${describe(update)}` : noKey },
+    { attackId: 'original_api_test_account_token', expected: '공개 키와 시험 계정 토큰으로 원본 자료 API를 직접 부르면 권한 오류로 거부됨',
+      observed: '미실행: 시험 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
+    { attackId: 'static_files_key_marker_search', expected: '첫 화면과 index.html에 Supabase 키 형태 문자열과 시드 표식이 없음',
+      observed: `정적 파일 ${fetched.length}/2개 받음, 키 형태 문자열 포함 ${keyHits}개, 시드 표식 포함 ${markerHits}개` },
   ];
 }

@@ -11,9 +11,15 @@ await mkdir(resolve(root, 'public'), { recursive: true });
 // Never clear public/ as a whole: it holds index.html and aleph.json.
 await rm(resolve(root, 'public', 'data.json'), { force: true });
 console.log('공개 data.json을 만들지 않습니다. 메모는 Supabase notes 테이블에 있습니다.');
+const allowedRoutes = config.allowedRoutes;
+if (config.step >= 3 && (!Array.isArray(allowedRoutes) || !allowedRoutes.length
+    || allowedRoutes.some(route => typeof route !== 'string' || !/^(GET|POST|PUT|PATCH|DELETE) \/api\/\S+$/u.test(route)))) {
+  throw new Error('3단계부터 aleph.config.json의 allowedRoutes에 "메서드 /api/경로" 형식의 허용 경로가 하나 이상 필요합니다.');
+}
 if (!process.argv.includes('--local')) {
   const identity = deploymentIdentity(process.env, config);
+  const published = config.step >= 3 ? { ...identity, allowedRoutes } : identity;
   await writeFile(resolve(root, 'public', 'aleph.json'),
-    `${JSON.stringify(identity, null, 2)}\n`, 'utf8');
-  console.log('배포 저장소·커밋·주소를 public/aleph.json에 기록했습니다.');
+    `${JSON.stringify(published, null, 2)}\n`, 'utf8');
+  console.log('배포 저장소·커밋·주소와 허용 경로를 public/aleph.json에 기록했습니다.');
 }
