@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (config.step !== 1 && config.step !== 3) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -13,6 +13,7 @@ export async function runAttackChecks(config) {
     throw new Error('aleph.config.json의 실제 배포 주소를 먼저 넣어 주세요.');
   }
   if (config.step === 3) return runStep3Checks(app, config);
+  if (config.step === 4) return runStep4Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -93,5 +94,34 @@ async function runStep3Checks(app, config) {
       observed: firstPage ? `첫 화면 HTTP ${firstPage.status}, X-Content-Type-Options: ${firstPage.nosniff ?? '없음'}` : '첫 화면 요청 실패' },
     { attackId: 'aleph_json_available', expected: '배포 주소의 /aleph.json이 200으로 열림',
       observed: identity ? `/aleph.json HTTP ${identity.status}` : '/aleph.json 요청 실패' },
+  ];
+}
+
+// Fixed id of B's public test note from supabase/step4-owners.sql.
+const B_TEST_NOTE = '/api/notes/b4000000-0000-4000-8000-000000000001';
+
+async function runStep4Checks(app, config) {
+  const loginChecks = await runStep3Checks(app, config);
+  const [read, update, remove] = await Promise.all([
+    probe(app, B_TEST_NOTE),
+    probe(app, B_TEST_NOTE, { method: 'PUT', body: { title: '비로그인 수정 시도', body: '거부되어야 함' } }),
+    probe(app, B_TEST_NOTE, { method: 'DELETE' }),
+  ]);
+  const describe = result => (result
+    ? `HTTP ${result.status}, JSON ${result.json ? '예' : '아니오'}, 오류 ${result.errorCode ?? '없음'}`
+    : '요청 실패');
+  const notRun = '미실행: A·B 계정의 실제 로그인 토큰이 필요해 이 점검에서는 보내지 않음(비밀번호·토큰을 기록하지 않음)';
+  return [
+    ...loginChecks,
+    { attackId: 'anonymous_note_read_by_id', expected: '토큰 없는 GET /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 GET /api/notes/:id(B 시험 메모): ${describe(read)}` },
+    { attackId: 'anonymous_note_update', expected: '토큰 없는 PUT /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 PUT /api/notes/:id(B 시험 메모): ${describe(update)}` },
+    { attackId: 'anonymous_note_delete', expected: '토큰 없는 DELETE /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 DELETE /api/notes/:id(B 시험 메모): ${describe(remove)}` },
+    { attackId: 'other_user_note_read', expected: 'A가 B 메모 ID로 GET하면 403 JSON 오류로 거부됨', observed: notRun },
+    { attackId: 'other_user_note_update', expected: 'A가 B 메모 ID로 PUT하면 403 JSON 오류로 거부되고 B 메모가 그대로임', observed: notRun },
+    { attackId: 'other_user_note_delete', expected: 'A가 B 메모 ID로 DELETE하면 403 JSON 오류로 거부되고 B 메모가 남음', observed: notRun },
+    { attackId: 'owner_change', expected: '본문에 상대 owner_id를 넣은 POST·PUT이 403 JSON 오류로 거부됨', observed: notRun },
   ];
 }

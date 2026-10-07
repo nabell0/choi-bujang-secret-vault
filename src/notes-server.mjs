@@ -59,6 +59,21 @@ export function dbFailure(response, error) {
   return sendError(response, 502, 'NOTES_UNAVAILABLE');
 }
 
+// True when the body names an owner other than the verified user. The owner is never taken from the body.
+export function requestsOtherOwner(request, userId) {
+  let body = request.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { return false; }
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  return ['owner_id', 'ownerId'].some(key => Object.hasOwn(body, key)
+    && String(body[key]).toLowerCase() !== userId.toLowerCase());
+}
+
+export function refuseOwnerChange(response) {
+  return sendError(response, 403, 'OWNER_CHANGE_FORBIDDEN', '메모 소유자는 바꿀 수 없습니다.');
+}
+
 // Reads only id/title/body from a JSON object body; any other field is ignored.
 export function readNoteInput(request, { allowId }) {
   let body;
