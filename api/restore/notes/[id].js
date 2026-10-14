@@ -5,6 +5,7 @@
 import {
   UUID, dbFailure, noteBackupTable, noteContentSha256, notesTable, requireLogin, restoreAuditTable, sendError,
 } from '../../../src/notes-server.mjs';
+import { requireApprovedDevice } from '../../../src/device-auth.mjs';
 
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
@@ -13,6 +14,7 @@ export default async function handler(request, response) {
   }
   const login = await requireLogin(request, response);
   if (!login) return;
+  if (!await requireApprovedDevice(request, response, login, '/api/restore/notes/:id')) return;
 
   const id = typeof request.query?.id === 'string' ? request.query.id.toLowerCase() : '';
   if (!UUID.test(id)) return sendError(response, 400, 'INVALID_NOTE_ID', '메모 ID는 UUID여야 합니다.');

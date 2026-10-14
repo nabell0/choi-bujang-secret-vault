@@ -3,11 +3,13 @@
 import {
   UUID, dbFailure, isInstructor, markResource, noticesTable, readNoteInput, requireLogin, sendError, toNote,
 } from '../../../src/notes-server.mjs';
+import { requireApprovedDevice } from '../../../src/device-auth.mjs';
 
 export default async function handler(request, response) {
   markResource(request, response, '/api/admin/notices/:id');
   const login = await requireLogin(request, response);
   if (!login) return;
+  if (!await requireApprovedDevice(request, response, login, '/api/admin/notices/:id')) return;
   if (!isInstructor(login)) return sendError(response, 403, 'INSTRUCTOR_ONLY');
 
   const id = request.query?.id;

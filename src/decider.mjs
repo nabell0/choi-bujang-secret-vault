@@ -108,11 +108,13 @@ function readSignals(signals) {
 // subjectId는 엔진이 만든 가명이라 형식을 좁히지 않고, 공백·제어 문자 없는 한 덩어리인지만 봅니다.
 const isPseudonym = value => typeof value === 'string' && /^[^\s\p{Cc}]{1,256}$/u.test(value);
 const DEVICE_ID = /^[0-9a-f]{16}$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const EMPTY_QUERY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 // 계약 형식을 벗어난 요청은 null입니다. 결과에는 판정에 쓰는 공식 값만 담습니다:
 // 가명 사용자(subjectId), 기기(deviceId, deviceRegistered), 요청 종류(service·method·route·path·queryLength),
-// 판정 근거(stepUp·recentEvents·signals). classId·projectId·querySha256·at·policyRevision은 엔진이 이미
-// 확인한 값이라 이름만 확인하고 담지 않습니다. 이 결과는 로그나 응답으로 내보내지 않습니다.
+// 판정 근거(stepUp·recentEvents·signals). querySha256은 queryLength와 맞는지(빈 쿼리면 빈 문자열의 해시)만 봅니다.
+// classId·projectId·at·policyRevision은 엔진이 이미 확인한 값이라 이름만 확인합니다. 이 결과는 로그나 응답으로 내보내지 않습니다.
 export function readDecisionInput(request) {
   if (!hasExactKeys(request, REQUEST_KEYS) || request.schema !== 'aleph.decision.v1'
       || typeof request.requestId !== 'string' || !request.requestId
@@ -120,8 +122,10 @@ export function readDecisionInput(request) {
       || typeof request.deviceId !== 'string' || !DEVICE_ID.test(request.deviceId)
       || typeof request.method !== 'string' || typeof request.deviceRegistered !== 'boolean'
       || typeof request.service !== 'string' || typeof request.route !== 'string'
-      || typeof request.path !== 'string' || !Number.isInteger(request.queryLength)
-      || request.queryLength < 0) return null;
+      || typeof request.path !== 'string' || !request.path.startsWith('/')
+      || !Number.isInteger(request.queryLength) || request.queryLength < 0
+      || typeof request.querySha256 !== 'string' || !SHA256_HEX.test(request.querySha256)
+      || (request.queryLength === 0) !== (request.querySha256 === EMPTY_QUERY_SHA256)) return null;
   const stepUp = readStepUp(request.stepUp);
   const recentEvents = readRecentEvents(request.recentEvents);
   const signals = readSignals(request.signals);

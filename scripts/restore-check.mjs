@@ -58,6 +58,10 @@ mock.module(new URL('../src/verify-login.mjs', import.meta.url).href, {
       ? { kind: 'student', userId: LOGINS[authorization] } : null),
   },
 });
+// 11단계 기기 확인은 scripts/device-check.mjs가 따로 시험합니다. 여기서는 승인된 기기로 두고 복원 검사만 봅니다.
+mock.module(new URL('../src/device-auth.mjs', import.meta.url).href, {
+  namedExports: { requireApprovedDevice: async () => true },
+});
 process.env.SUPABASE_URL = 'https://supabase.invalid';
 process.env.SUPABASE_SECRET_KEY = 'fake-server-key-for-local-check';
 const { default: handler } = await import(new URL('../api/restore/notes/[id].js', import.meta.url).href);

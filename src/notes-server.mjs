@@ -62,6 +62,7 @@ export const notesTable = () => supabase.from('notes');
 export const noticesTable = () => supabase.from('notices');
 export const noteBackupTable = () => supabase.from('notes_backup');
 export const restoreAuditTable = () => supabase.from('note_restore_audit');
+export const deviceTable = () => supabase.from('device_registrations');
 
 // Same formula as supabase/step10-note-backup.sql: SHA-256 of "<title UTF-8 byte length>:<title><content>".
 export function noteContentSha256(title, content) {

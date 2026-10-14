@@ -15,6 +15,7 @@
     "policy:check": "node scripts/policy-check.mjs",
     "owner:check": "node --experimental-test-module-mocks --no-warnings scripts/owner-check.mjs",
     "restore:check": "node --experimental-test-module-mocks --no-warnings scripts/restore-check.mjs",
+    "device:check": "node --experimental-test-module-mocks --no-warnings scripts/device-check.mjs",
     "xdr:run": "node scripts/xdr-run.mjs"
   },
   "engines": {

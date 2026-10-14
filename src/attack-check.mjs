@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -20,6 +20,7 @@ export async function runAttackChecks(config) {
   if (config.step === 8) return runStep8Checks(app, config);
   if (config.step === 9) return runStep9Checks(app, config);
   if (config.step === 10) return runStep10Checks(app, config);
+  if (config.step === 11) return runStep11Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -300,5 +301,26 @@ async function runStep10Checks(app, config) {
       observed: restore
         ? `토큰 없는 POST /api/restore/notes/:id(B 시험 메모): HTTP ${restore.status}, JSON ${restore.json ? '예' : '아니오'}, 오류 ${restore.errorCode ?? '없음'}`
         : '토큰 없는 POST /api/restore/notes/:id(B 시험 메모): 요청 실패' },
+  ];
+}
+
+// Step 11 adds two checks, so the three not-run checks that the engine's device judgement covers become one entry.
+const STEP11_MERGED_NOT_RUN = [
+  { attackId: 'engine_device_judgement', from: ['unregistered_device_access', 'anomalous_access_step_up', 'doppelganger_device_revocation'],
+    expected: '미등록 기기 요청은 device_not_registered로, 평소와 다른 접속은 재로그인 확인 전 step_up_required로 막히고, 다른 네트워크의 갑작스러운 다량 조회 기기는 burst_read 회수 제안 뒤 접근이 막힘',
+    observed: '미실행: 반 엔진의 기기 판정·회수는 심판이 맡으며, 이 점검은 엔진 쪽 기기 접속 요청을 보내지 않음' },
+];
+
+async function runStep11Checks(app, config) {
+  const earlier = mergeNotRun(await runStep10Checks(app, config), STEP11_MERGED_NOT_RUN);
+  const challenge = await probe(app, '/api/device/challenge');
+  return [
+    ...earlier,
+    { attackId: 'anonymous_device_challenge', expected: '토큰 없는 GET /api/device/challenge가 401 JSON 오류로 거부되고 기기 목록·일회용 질문이 오지 않음',
+      observed: challenge
+        ? `토큰 없는 GET /api/device/challenge: HTTP ${challenge.status}, JSON ${challenge.json ? '예' : '아니오'}, 오류 ${challenge.errorCode ?? '없음'}`
+        : '토큰 없는 GET /api/device/challenge: 요청 실패' },
+    { attackId: 'app_signature_tampering', expected: '로그인만 하고 기기 서명 없이 보호 요청, 서명 뒤 경로 변경, 서명 뒤 수정 본문 변경이 모두 403 DEVICE_* JSON 오류로 거부되고 메모가 그대로임',
+      observed: '미실행: 실제 로그인 토큰과 등록부에서 승인한 기기의 패스키가 필요해 보내지 않음(토큰·키를 기록하지 않음)' },
   ];
 }

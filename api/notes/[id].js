@@ -4,11 +4,13 @@ import {
   UUID, dbFailure, markResource, notesTable, readNoteInput, refuseOwnerChange, requestsOtherOwner, requireLogin,
   sendError, toNote,
 } from '../../src/notes-server.mjs';
+import { requireApprovedDevice } from '../../src/device-auth.mjs';
 
 export default async function handler(request, response) {
   markResource(request, response, '/api/notes/:id');
   const login = await requireLogin(request, response);
   if (!login) return;
+  if (!await requireApprovedDevice(request, response, login, '/api/notes/:id')) return;
 
   const id = request.query?.id;
   if (typeof id !== 'string' || !UUID.test(id)) {

@@ -1,11 +1,13 @@
 // GET /api/notices: class notices for any verified login. Writes are refused here for everyone;
 // instructors change notices only through /api/admin/notices/:id after a server-side instructor check.
 import { dbFailure, markResource, noticesTable, requireLogin, sendError, toNote } from '../src/notes-server.mjs';
+import { requireApprovedDevice } from '../src/device-auth.mjs';
 
 export default async function handler(request, response) {
   markResource(request, response, '/api/notices');
   const login = await requireLogin(request, response);
   if (!login) return;
+  if (!await requireApprovedDevice(request, response, login, '/api/notices')) return;
 
   if (request.method === 'GET') {
     const { data, error } = await noticesTable().select('id, title, content').order('created_at');

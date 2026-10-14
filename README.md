@@ -227,6 +227,46 @@ npm run bundle
 
 **남은 약점:** 복구 경로는 판정기의 허용 경로(`allowedRoutes`)에 넣지 않았고 판정기 규칙도 바꾸지 않았습니다. 엔진을 거치는 요청이라면 판정기의 `zone.default_deny`로 거부됩니다. 사본은 SQL을 실행한 시점의 메모만 담으므로, 그 뒤에 만든 메모나 사본 전에 이미 변조된 메모는 되살릴 수 없습니다. 서버 함수는 이제 11개로 Vercel Hobby 한도(12개)에 가깝습니다.
 
+## 11단계: 나만의 접속 앱을 완성합니다
+
+- **설치형 웹앱 설정:** `public/manifest.webmanifest`(앱 이름 `BYTE BACK 자료실`, 짧은 이름 `자료실`, `display: standalone`, 시작·범위 `/`, 아이콘 `public/icon-192.png`·`icon-512.png`)를 두고, `public/index.html`의 `<link rel="manifest" href="/manifest.webmanifest">`로 연결했습니다. 따로 설치하는 접속 프로그램은 없습니다. 브라우저의 "앱 설치"·"홈 화면에 추가"로 같은 자료실 화면을 앱 창으로 엽니다.
+- **앱·기기 상태 표시:** 첫 화면의 "앱·기기 상태"에 실행 방식(브라우저 탭 / 설치한 앱 창), 연결(온라인 / 오프라인), 기기 승인을 보여 줍니다. 앱 설치·앱 창 실행은 표시용이며 기기 확인이나 권한 판단에 쓰지 않습니다. 기기 승인은 아래 흐름에서 서버가 돌려준 결과로만 바뀝니다.
+- **기기 승인 흐름:**
+  1. 로그인하면 "이 기기 승인 요청"·"승인 상태 확인" 단추가 보입니다. 이때 메모 목록·작성 칸은 숨겨져 있고, 자료 요청도 보내지 않습니다.
+  2. **이 기기 승인 요청:** 브라우저가 이 기기의 패스키(ES256)를 만들고, 공개키만 `POST /api/device/request`로 보냅니다. 서버는 일회용 질문(2분, 로그인 사용자에 묶임)·앱 주소·패스키 형식을 확인한 뒤 등록부 `device_registrations`에 **`pending`** 으로만 넣고, 16자리 **확인 코드**(`deviceId`)를 돌려줍니다. 요청 본문에 `status: approved`를 넣어도 DB 트리거가 `pending`으로 바꿉니다.
+  3. **승인:** 관리자가 Supabase SQL Editor에서 확인 코드를 대조해 `supabase/step11-devices.sql`의 [승인] 문으로 승인합니다. 화면·API에는 승인 경로가 없습니다(서버 키는 등록부를 조회·추가만 할 수 있음).
+  4. **승인 상태 확인:** 브라우저가 이 페이지에서만 쓰는 내보낼 수 없는 서명 키를 만들고, 그 공개키 지문을 패스키 질문에 넣어 서명합니다. 서버(`POST /api/device/verify`)가 패스키 서명·앱 주소·등록부 상태를 확인하고, `approved`일 때만 30분짜리 기기 확인 결과를 줍니다. `pending`이면 `승인 대기`, `revoked`면 `승인 거둠`으로 표시하고 자료는 열지 않습니다.
+  5. 승인된 뒤에만 메모를 불러옵니다. 보호 요청(`/api/notes`, `/api/notes/:id`, `/api/notices`, `/api/notices/:id`, `/api/admin/notices/:id`, `/api/restore/notes/:id`)마다 서버가 로그인(401) → 기기 서명 → 등록부 재확인 → 판정기 `decide()` 순서로 확인합니다. 판정기에는 계약 필드만 담아 보내고 `deviceRegistered`는 등록부가 `approved`일 때만 `true`입니다. 판정기가 거부하면 403 `DEVICE_NOT_REGISTERED`입니다.
+- **요청 서명(설치형 앱 서명):** 화면은 보호 요청마다 `aleph.device-request.v1`, 메서드, 경로+쿼리, 본문 SHA-256, 서명 시각, 일회용 값을 줄바꿈으로 이어 서명하고 `X-Aleph-Device-Session`·`X-Aleph-Signature`·`X-Aleph-Signed-At`·`X-Aleph-Nonce` 머리글로 보냅니다. 서버는 실제로 받은 메서드·경로·본문으로 같은 문장을 다시 만들어 검증합니다.
+
+| 공격 | 서버 결과 |
+| --- | --- |
+| 설치형 앱 서명 없이 보호 요청 | 403 `DEVICE_SIGNATURE_REQUIRED`, 자료 없음 |
+| 서명 뒤 요청 경로를 변경 | 403 `DEVICE_SIGNATURE_INVALID` |
+| 서명 뒤 수정 본문을 변경 | 403 `DEVICE_SIGNATURE_INVALID`, 메모 그대로 |
+| 서명 뒤 메서드 변경, 60초 지난 서명, 다른 계정의 기기 확인 결과, 위조한 기기 확인 결과 | 403 `DEVICE_*` |
+| 승인 대기·회수된 기기 | 403(판정기 `device_not_registered`) |
+
+- **판정기(`src/decider.mjs`):** 계약에 서명·본문 필드가 없으므로 서명 대조는 API가 맡습니다. 판정기는 계약 필드만 읽으며, 이번에 `path`가 `/`로 시작하는지와 `querySha256`이 64자리 16진수이고 `queryLength`와 맞는지(쿼리 길이 0 ⇔ 빈 문자열 해시)를 형식 검사에 더했습니다. 맞지 않으면 `starter_not_ready`(규칙 `starter.deny`)로 거부하고, API는 이를 403 `DEVICE_NOT_REGISTERED`로 돌려줍니다. 구역 규칙(`zone.*`) 거부는 기존처럼 API의 소유자·강사 권한 확인에 맡겨 복구·공지 관리 흐름을 바꾸지 않습니다. `RULE_IDS`·`decide()` 이름과 응답 다섯 항목은 그대로입니다.
+- **브라우저 저장소:** 로그인은 `persistSession: false`로 메모리에만 두고, 기기 확인 결과와 서명 키도 페이지 메모리에만 둡니다. 로컬·세션 저장소, 쿠키, 색인 DB에 넣지 않으므로 새로고침하면 다시 로그인·기기 확인을 해야 합니다.
+- **설정:** `aleph.config.json`의 `step`을 `11`로 올렸습니다. 빌드가 만드는 `public/aleph.json`의 `step`도 이 값을 그대로 씁니다. `judgeIssuer`·허용 경로·원본 API 주소는 바꾸지 않았습니다.
+- **오프라인 안내:** 연결이 끊기면 화면 맨 위에 "오프라인입니다…" 안내가 나옵니다. manifest의 `description`에도 같은 뜻을 적었습니다. 메모가 기기에 남지 않도록 서비스 워커·캐시는 쓰지 않습니다. 그래서 처음부터 오프라인으로 앱을 열면 브라우저 기본 오류 화면이 나옵니다.
+- **그대로인 것:** `vercel.json`의 `nosniff` 헤더, 빌드(`scripts/build-public.mjs`), 기존 API의 로그인·소유자·강사 권한·복구 로직, 탐지 함수는 바꾸지 않았고 기기 확인은 로그인 확인 바로 뒤에 덧붙였습니다. 정적 파일에 Supabase 주소·공개 키는 없고, 로그인 설정은 지금처럼 `/api/auth-config`에서 받습니다.
+
+### 11단계 확인 절차
+
+1. **등록부 만들기(한 번):** Supabase 대시보드 → SQL Editor에 `supabase/step11-devices.sql`을 붙여넣고 Run. 마지막 권한 대조표에서 `service_role`은 SELECT·INSERT만 `true`, `anon`·`authenticated`는 모두 `false`여야 합니다.
+2. **로컬 연습:** `npm run decider:test`(통과 6줄), `npm run device:check`(통과 17줄), `npm run owner:check`·`restore:check`(통과 9줄씩), `npm run policy:check`(통과 10줄), `npm run detect:test`(통과 6줄), `npm run fixture:7`, `npm run test:r5`, `npm run build -- --local`.
+3. **승인 전:** 배포 주소에서 로그인하면 기기 승인이 `확인되지 않음`이고 메모 칸에 "기기 승인 전에는 자료를 열지 않습니다"만 보여야 합니다. F12 → Network에 `/api/notes` 요청이 없어야 합니다.
+4. **승인 요청:** "이 기기 승인 요청" → 패스키 만들기 → `승인 대기 · 확인 코드 ○○○○` 표시. "승인 상태 확인"을 눌러도 `승인 대기`이고 자료는 열리지 않아야 합니다.
+5. **승인:** SQL Editor에서 [목록]으로 확인 코드·소유자를 대조하고 [승인] 문을 실행 → 화면에서 "승인 상태 확인" → `승인됨 · 서버가 패스키 서명과 등록부를 확인함`과 함께 기존 메모 목록·추가·수정·삭제가 정상이어야 합니다.
+6. **거부되어야 할 것:** F12 → Console에서 `fetch('/api/notes', { headers: { Authorization: 'Bearer …' } })`처럼 서명 없이 부르면 403 `DEVICE_SIGNATURE_REQUIRED`. [회수] 문을 실행하면 다음 요청부터 403이 나고 화면이 다시 잠겨야 합니다.
+7. **설치형 앱:** F12 → Application → Manifest에서 이름 `BYTE BACK 자료실`·오류 없음. 앱으로 설치해도 기기 승인 표시는 바뀌지 않아야 합니다. F12 → Network → Offline이면 오프라인 안내가 보여야 합니다.
+
+2026-10-14 로컬 확인 기록: 위 2번의 명령이 모두 통과했습니다(`npm run test:package`는 시작 틀의 `api/` 파일 목록 비교라 이번 변경 전 커밋에서도 같은 1건이 실패합니다). `public/`에서 Supabase 키 형태 문자열과 `localStorage`·`sessionStorage`·`indexedDB`·`document.cookie` 사용은 0건이었습니다. `package.json`·`package-lock.json`만 빈 폴더에 복사해 `npm install`을 실행했을 때 오류 없이 끝났습니다. 등록부 SQL 실행, 배포, 실제 패스키로 한 3~7번은 **미실행**입니다. `npm run device:check`는 로그인·DB·인증 장치를 가짜로 바꾼 연습이며, `npm run decider:test`와 함께 심판 판정이 아닙니다.
+
+**남은 약점:** 서버 함수가 12개로 Vercel Hobby 한도에 닿았습니다. 시험·심판 계정도 승인된 기기 없이는 보호 자료 API에서 403을 받습니다. 반 엔진 쪽의 설치형 앱 서명 검증은 계약에 없어 이 저장소가 다루지 않습니다. 일회용 값(nonce)은 기록하지 않으므로 같은 요청을 60초 안에 다시 보내는 것은 막지 못합니다. 패스키 제조사 증명(attestation)은 확인하지 않습니다. 오프라인 안내는 화면을 연 뒤 연결이 끊긴 경우에만 보입니다.
+
 ## 가상 메모 노출 확인 절차
 
 검색어는 메모 본문·제목 일부입니다. `[가]`처럼 한 글자를 괄호로 감싼 정규식을 써서 이 README 자체는 검색에 걸리지 않게 합니다. Windows의 Git 기본 정규식은 이런 한글 괄호식을 놓치므로 `git grep`에는 반드시 `-P`를 붙이세요. 화면 확인 때는 `supabase/*.local.sql`의 `content` 값을 그대로 검색하세요.
