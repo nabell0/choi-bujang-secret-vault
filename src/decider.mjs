@@ -38,7 +38,8 @@ function readRecentEvents(events) {
   if (!Array.isArray(events) || events.length > MAX_RECENT_EVENTS) return null;
   const read = [];
   for (const event of events) {
-    if (!hasExactKeys(event, ['kind', 'ageSeconds', 'count']) || !isLabel(event.kind)
+    if (!hasExactKeys(event, ['kind', 'ageSeconds', 'count'])
+        || typeof event.kind !== 'string' || !event.kind || event.kind.length > 64
         || !Number.isFinite(event.ageSeconds) || event.ageSeconds < 0
         || !Number.isInteger(event.count) || event.count < 0) return null;
     read.push({ kind: event.kind, ageSeconds: event.ageSeconds, count: event.count });
