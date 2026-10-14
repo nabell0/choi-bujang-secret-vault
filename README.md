@@ -230,10 +230,10 @@ npm run bundle
 ## 11단계: 나만의 접속 앱을 완성합니다
 
 - **설치형 웹앱 설정:** `public/manifest.webmanifest`(앱 이름 `BYTE BACK 자료실`, 짧은 이름 `자료실`, `display: standalone`, 시작·범위 `/`, 아이콘 `public/icon-192.png`·`icon-512.png`)를 두고, `public/index.html`의 `<link rel="manifest" href="/manifest.webmanifest">`로 연결했습니다. 따로 설치하는 접속 프로그램은 없습니다. 브라우저의 "앱 설치"·"홈 화면에 추가"로 같은 자료실 화면을 앱 창으로 엽니다.
-- **앱·기기 상태 표시:** 첫 화면의 "앱·기기 상태"에 연결(온라인 / 오프라인)과 기기 승인을 보여 줍니다. 화면은 앱 설치 여부(설치 표시·앱 창 실행)를 읽지도 표시하지도 않습니다. 설치 표시는 누구나 흉내 낼 수 있어 신뢰 근거가 아니기 때문입니다(심판 `S11_BADGE_IS_TRUST` 대응). 기기 승인은 아래 흐름에서 서버가 돌려준 결과로만 바뀝니다.
+- **앱·기기 상태 표시:** 첫 화면의 "앱·기기 상태"에 연결(온라인 / 오프라인)과 기기 승인을 보여 줍니다. 화면은 앱 설치 여부(설치 표시·앱 창 실행)를 읽지도 표시하지도 않습니다. 설치 표시는 누구나 흉내 낼 수 있어 신뢰 근거가 아니기 때문입니다(심판 `S11_BADGE_IS_TRUST` 대응). 「이 기기 승인 요청」 단추의 응답이나 등록부 목록도 승인 표시를 바꾸지 않습니다. 기기 승인 표시가 `승인됨`이 되는 곳은 `POST /api/device/verify`가 패스키 서명과 등록부를 확인해 200 `approved`를 돌려준 경우 하나뿐이며, 자료도 그때만 엽니다.
 - **기기 승인 흐름:**
   1. 로그인하면 "이 기기 승인 요청"·"승인 상태 확인" 단추가 보입니다. 이때 메모 목록·작성 칸은 숨겨져 있고, 자료 요청도 보내지 않습니다.
-  2. **이 기기 승인 요청:** 브라우저가 이 기기의 패스키(ES256)를 만들고, 공개키만 `POST /api/device/request`로 보냅니다. 서버는 일회용 질문(2분, 로그인 사용자에 묶임)·앱 주소·패스키 형식을 확인한 뒤 등록부 `device_registrations`에 **`pending`** 으로만 넣고, 16자리 **확인 코드**(`deviceId`)를 돌려줍니다. 요청 본문에 `status: approved`를 넣어도 DB 트리거가 `pending`으로 바꿉니다.
+  2. **이 기기 승인 요청:** 브라우저가 이 기기의 패스키(ES256)를 만들고, 공개키만 `POST /api/device/request`로 보냅니다. 서버는 일회용 질문(2분, 로그인 사용자에 묶임)·앱 주소·패스키 형식을 확인한 뒤 등록부 `device_registrations`에 **`pending`** 으로만 넣고, 16자리 **확인 코드**(`deviceId`)를 돌려줍니다. 같은 기기가 다시 요청하면 승인 상태를 알려 주지 않고 409 `DEVICE_ALREADY_REQUESTED`만 돌려줍니다. 요청 본문에 `status: approved`를 넣어도 DB 트리거가 `pending`으로 바꿉니다.
   3. **승인:** 관리자가 Supabase SQL Editor에서 확인 코드를 대조해 `supabase/step11-devices.sql`의 [승인] 문으로 승인합니다. 화면·API에는 승인 경로가 없습니다(서버 키는 등록부를 조회·추가만 할 수 있음).
   4. **승인 상태 확인:** 브라우저가 이 페이지에서만 쓰는 내보낼 수 없는 서명 키를 만들고, 그 공개키 지문을 패스키 질문에 넣어 서명합니다. 서버(`POST /api/device/verify`)가 패스키 서명·앱 주소·등록부 상태를 확인하고, `approved`일 때만 30분짜리 기기 확인 결과를 줍니다. `pending`이면 `승인 대기`, `revoked`면 `승인 거둠`으로 표시하고 자료는 열지 않습니다.
   5. 승인된 뒤에만 메모를 불러옵니다. 보호 요청(`/api/notes`, `/api/notes/:id`, `/api/notices`, `/api/notices/:id`, `/api/admin/notices/:id`, `/api/restore/notes/:id`)마다 서버가 로그인(401) → 기기 서명 → 등록부 재확인 → 판정기 `decide()` 순서로 확인합니다. 판정기에는 계약 필드만 담아 보내고 `deviceRegistered`는 등록부가 `approved`일 때만 `true`입니다. 판정기가 거부하면 403 `DEVICE_NOT_REGISTERED`입니다.
@@ -256,7 +256,7 @@ npm run bundle
 ### 11단계 확인 절차
 
 1. **등록부 만들기(한 번):** Supabase 대시보드 → SQL Editor에 `supabase/step11-devices.sql`을 붙여넣고 Run. 마지막 권한 대조표에서 `service_role`은 SELECT·INSERT만 `true`, `anon`·`authenticated`는 모두 `false`여야 합니다.
-2. **로컬 연습:** `npm run decider:test`(통과 6줄), `npm run device:check`(통과 17줄), `npm run owner:check`·`restore:check`(통과 9줄씩), `npm run policy:check`(통과 10줄), `npm run detect:test`(통과 6줄), `npm run fixture:7`, `npm run test:r5`, `npm run build -- --local`.
+2. **로컬 연습:** `npm run decider:test`(통과 6줄), `npm run device:check`(통과 18줄), `npm run owner:check`·`restore:check`(통과 9줄씩), `npm run policy:check`(통과 10줄), `npm run detect:test`(통과 6줄), `npm run fixture:7`, `npm run test:r5`, `npm run build -- --local`.
 3. **승인 전:** 배포 주소에서 로그인하면 기기 승인이 `확인되지 않음`이고 메모 칸에 "기기 승인 전에는 자료를 열지 않습니다"만 보여야 합니다. F12 → Network에 `/api/notes` 요청이 없어야 합니다.
 4. **승인 요청:** "이 기기 승인 요청" → 패스키 만들기 → `승인 대기 · 확인 코드 ○○○○` 표시. "승인 상태 확인"을 눌러도 `승인 대기`이고 자료는 열리지 않아야 합니다.
 5. **승인:** SQL Editor에서 [목록]으로 확인 코드·소유자를 대조하고 [승인] 문을 실행 → 화면에서 "승인 상태 확인" → `승인됨 · 서버가 패스키 서명과 등록부를 확인함`과 함께 기존 메모 목록·추가·수정·삭제가 정상이어야 합니다.

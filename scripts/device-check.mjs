@@ -168,6 +168,11 @@ const checks = [
     proofA = await verifyThisDevice(A, passkeyA);
     return proofA.response.statusCode === 200 && proofA.response.body.status === 'approved' && typeof proofA.session === 'string';
   }],
+  ['승인된 기기가 승인 요청 단추를 다시 눌러도 409, 응답에 승인 상태·기기 확인 결과 없음', async () => {
+    const r = await requestApproval(A, passkeyA);
+    return r.statusCode === 409 && r.body?.error === 'DEVICE_ALREADY_REQUESTED'
+      && !('status' in r.body) && !r.body.session && db.device_registrations.length === 1;
+  }],
   ['다른 키로 서명한 패스키 응답은 401 DEVICE_NOT_VERIFIED', async () => {
     const { response } = await verifyThisDevice(A, passkeyA, { signWith: authenticator().privateKey });
     return response.statusCode === 401 && response.body?.error === 'DEVICE_NOT_VERIFIED';

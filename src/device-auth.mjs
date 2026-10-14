@@ -117,7 +117,9 @@ export async function requestDevice(login, request, response) {
     const { data, error: readError } = await deviceTable().select('owner_id, status').eq('device_id', deviceId).limit(1);
     if (readError) return dbFailure(response, readError, 'DEVICE_REGISTRY_UNAVAILABLE');
     if (data[0]?.owner_id !== userId) return sendError(response, 409, 'DEVICE_TAKEN');
-    return response.status(200).json({ deviceId, status: data[0].status });
+    // 승인 요청 응답은 승인 상태를 알려 주지 않습니다. 승인 여부는 /api/device/verify의 서버 확인으로만 받습니다.
+    return response.status(409).json({ error: 'DEVICE_ALREADY_REQUESTED', deviceId,
+      message: '이 기기는 이미 승인을 요청했습니다. 「승인 상태 확인」을 눌러 주세요.' });
   }
   if (error) return dbFailure(response, error, 'DEVICE_REGISTRY_UNAVAILABLE');
   return response.status(201).json({ deviceId, status: 'pending' });

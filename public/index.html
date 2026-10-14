@@ -297,7 +297,6 @@
     const deviceError = document.querySelector('#device-error');
     const requestButton = document.querySelector('#device-request-button');
     const verifyButton = document.querySelector('#device-verify-button');
-    const STATUS_TEXT = { pending: '승인 대기', approved: '등록부 승인됨', revoked: '승인 거둠' };
     const showDeviceError = message => { deviceError.textContent = message; deviceError.hidden = !message; };
     const showApproval = (state, text) => { deviceSection.dataset.deviceApproval = state; approval.textContent = text; };
 
@@ -319,8 +318,9 @@
         return null;
       }
       if (!device) {
-        const list = data.devices.map(item => `${item.deviceId} ${STATUS_TEXT[item.status] ?? item.status}`).join(', ');
-        showApproval('unverified', data.devices.length ? `확인되지 않음 · 이 계정의 등록 기기: ${list}` : '확인되지 않음 · 승인을 요청한 기기 없음');
+        showApproval('unverified', data.devices.length
+          ? `확인되지 않음 · 이 계정으로 승인을 요청한 기기 ${data.devices.length}대 · 「승인 상태 확인」으로 서버 확인을 받아야 자료가 열립니다.`
+          : '확인되지 않음 · 승인을 요청한 기기 없음');
       }
       return data;
     }
@@ -353,8 +353,9 @@
           challenge: info.challenge, credentialId: b64url(credential.rawId), publicKey: b64url(publicKey), algorithm: -7,
           clientDataJSON: b64url(credential.response.clientDataJSON),
         });
-        if (status === 201 || status === 200) {
-          showApproval(data.status, `${STATUS_TEXT[data.status] ?? data.status} · 확인 코드 ${data.deviceId} · 관리자가 기기 등록부에서 이 코드를 승인한 뒤 「승인 상태 확인」을 누르세요. 그 전에는 자료가 열리지 않습니다.`);
+        if (status === 201) {
+          // 승인 요청 단추의 응답은 접수 확인일 뿐입니다. 승인 표시는 「승인 상태 확인」의 서버 확인 결과로만 바뀝니다.
+          showApproval('unverified', `확인되지 않음 · 승인 요청 접수 · 확인 코드 ${data.deviceId} · 관리자가 기기 등록부에서 이 코드를 승인한 뒤 「승인 상태 확인」을 누르세요. 그 전에는 자료가 열리지 않습니다.`);
         } else {
           showDeviceError(data?.message ?? '승인 요청을 보내지 못했습니다.');
         }
