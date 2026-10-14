@@ -158,24 +158,45 @@ npm run bundle
 
 ### 정책 사본 비교와 되돌리기
 
-- `npm run policy:diff`: `policy/safe-policy.json`(커밋 `aae1ff8`에서 뜬 판정기 규칙·자원 구역·허용 경로·정책 파일 해시)을 검증한 뒤 현재 시험 정책과의 차이만 보여 줍니다. 사본이 없거나 형식·해시·커밋 내용 대조에 실패하면 즉시 중단합니다.
-- `npm run policy:restore`: 같은 검증 뒤 복원할 버전과 바뀔 항목·파일을 미리 보여 주고 아무것도 바꾸지 않습니다. `npm run policy:restore -- --apply <정책 해시 앞 12자리>`로 실행해야 `src/decider.mjs`·`src/detect.mjs`와 `aleph.config.json`의 `allowedRoutes`만 사본 내용으로 되돌립니다. API·다른 설정·Git 이력은 그대로이고, 복원 전 파일은 `artifacts/policy-restore/`(Git 제외)에, 감사 기록은 `policy/restore-log.jsonl`에 한 줄씩 덧붙습니다.
+되돌리는 대상은 운영 판정기가 아니라 가상 **시험 정책**입니다. `src/decider.mjs`·`src/detect.mjs`·`aleph.config.json`·DB·배포는 읽지도 쓰지도 않습니다.
+
+| 파일 | 역할 |
+| --- | --- |
+| `policy/test-policy.json` | 지금의 시험 정책. 서비스별 규칙(`notes`·`notices`·`materials`·`devices`·`stepUp`·`detect`·`noteRestore`)과 감사 이력(`audit`) |
+| `policy/safe-policy.json` | 침해 전에 검증한 안전 사본(revision 9, 9단계 저장점 `aae1ff8`의 판정기·탐지 규칙 값). 10단계에 더한 `noteRestore`는 없음 |
+| `policy/safe-policy.manifest.json` | 사본의 revision·검증 시각·SHA-256을 사본과 따로 적은 기록 |
+
+- `npm run policy:diff`: 사본을 기록의 SHA-256·버전과 대조한 뒤, 복원할 버전과 서비스별로 바뀔 항목(지금 값 → 사본 값), 지금 메모 규칙으로 판단한 가상 요청(B의 A 메모 읽기 등)을 보여 줍니다. 아무것도 쓰지 않습니다.
+- `npm run policy:restore -- --service notes`: 같은 검증 뒤 되돌릴 서비스의 바뀔 항목과 그대로 둘 서비스를 미리 보여 주기만 합니다.
+- `npm run policy:restore -- --service notes --confirm`: 쓰기 직전에 사본과 시험 정책을 다시 읽어 미리보기 때와 같을 때만, **지정한 서비스 하나의 규칙만** 사본 값으로 바꿉니다. 다른 서비스 규칙(사본에 없는 `noteRestore` 포함)과 이전 감사 이력은 그대로 두고, 감사 이력에 `policy_restored` 한 줄(시각·서비스·revision·사본 SHA-256·바뀐 항목)만 덧붙입니다. 쓴 뒤 다시 읽어 "대상 서비스는 사본과 같음, 다른 서비스 그대로, 이전 감사 이력 그대로"를 확인하고, 하나라도 틀리면 복원 전 내용으로 되돌리고 중단합니다.
+- **중단:** 사본 기록이 없음, 사본 파일이 없음, SHA-256이 기록과 다름, 버전이 기록과 다름, 사본에 없는 서비스, 서비스 미지정이면 "복원을 중단합니다"로 끝나고(종료 코드 1) 시험 정책을 바꾸지 않습니다.
+
+**실제 실행 결과 (2026-10-14, 이 저장소의 `policy/` 파일):** 침해를 흉내 낸 시험 정책(revision 11, 메모 규칙 `ownerOnly: false`, `listAll: true`, `GET /notes`·`DELETE` 허용, 감사 이력 2줄)에서 시작했습니다.
+
+| 순서 | 명령 | 결과 |
+| --- | --- | --- |
+| 1 | `npm run policy:diff` | 사본 SHA-256 일치, 복원할 버전 revision 9 · `notes` 4개 항목이 사본과 다름 · 다른 서비스는 사본과 같음, `noteRestore`는 사본에 없음 · B의 A 메모 읽기 **허용**(침해 상태) |
+| 2 | `npm run policy:restore -- --service notes` | 미리보기만, 아무것도 바꾸지 않음 |
+| 3 | `npm run policy:restore -- --service notes --confirm` | `notes` 4개 항목 복원, revision 11 → 12 · 그대로 둔 서비스 `notices`·`materials`·`devices`·`stepUp`·`detect`·`noteRestore` · 이전 감사 이력 2줄 그대로, 한 줄 추가 · B의 A 메모 읽기 거부, A의 자기 메모 읽기 허용, 메모 목록 거부 |
+| 4 | `npm run policy:diff` | 모든 서비스가 사본과 같음(`noteRestore`는 그대로), 감사 이력 3줄 |
+
+1~4번 전후로 `src/decider.mjs`·`src/detect.mjs`·`aleph.config.json`의 SHA-256이 같았습니다. 중단 경우는 `npm run policy:check`가 임시 폴더의 복사본으로 확인합니다. 여기의 "B의 A 메모 읽기"는 시험 정책의 메모 규칙으로 가상 요청을 판단한 결과이며, 실제 API의 소유자 검사는 `npm run owner:check`가 따로 확인합니다.
 
 ### 확인 순서
 
 1. `npm ci`로 의존성을 설치합니다.
 2. `npm run restore:check`를 실행합니다. `통과` 아홉 줄이 나와야 합니다. 첫 두 줄은 B 메모를 변조·삭제한 뒤 B가 복원하면 ID·소유자·내용 해시가 사본과 같고 다른 메모가 그대로라는 뜻입니다.
 3. `npm run owner:check`를 실행합니다. `통과` 아홉 줄이 나와야 하고, B의 A 메모 읽기·수정·삭제는 403, A의 정상 요청은 200입니다.
-4. `npm run policy:diff`와 `npm run policy:restore`를 실행합니다. 지금은 `차이 없음`, `바뀔 항목: 없음`이 나와야 합니다.
+4. `npm run policy:check`를 실행합니다. `통과` 열 줄이 나와야 합니다. 그다음 `npm run policy:diff`에서 모든 서비스가 `사본과 같음`(`noteRestore`는 `사본에 없는 서비스`)이어야 합니다.
 5. `npm run decider:test`, `npm run detect:test`가 각각 `통과` 여섯 줄이어야 합니다.
 
-2026-10-14 로컬 확인 기록: 위 2~5번이 통과했습니다. 2·3번은 로그인 검사와 DB를 가짜로 바꾼 시험으로, 사본이 변조되면 409로 멈추고, A가 B 메모를 복원하려 하면 403이며, 감사 기록은 덧붙기만 함을 확인했습니다. 정책 되돌리기는 임시 복제본에서 판정기·탐지 함수·허용 경로를 일부러 바꾼 뒤 적용해, 복원 뒤 위 시험이 모두 통과하고 다른 설정이 그대로임을 확인했습니다. 가상 요청·로컬 시험이며 배포 확인이나 심판 판정이 아닙니다. `supabase/step10-note-backup.sql`은 학생이 Supabase SQL Editor에서 실행했다고 알려 왔습니다(결과 화면의 `b_test_backed_up`·`b_test_matches_now` 값은 이 기록에서 직접 보지 않았습니다). 배포된 복구 경로를 실제 B 계정으로 부른 기록은 아직 없습니다.
+2026-10-14 로컬 확인 기록: 위 2~5번이 통과했습니다. 2·3번은 로그인 검사와 DB를 가짜로 바꾼 시험으로, 사본이 변조되면 409로 멈추고, A가 B 메모를 복원하려 하면 403이며, 감사 기록은 덧붙기만 함을 확인했습니다. 4번(정책 되돌리기)은 시험 정책 방식으로 바꾼 뒤 다시 실행해 `통과` 열 줄이었습니다. 가상 요청·로컬 시험이며 배포 확인이나 심판 판정이 아닙니다. `supabase/step10-note-backup.sql`은 학생이 Supabase SQL Editor에서 실행했다고 알려 왔습니다(결과 화면의 `b_test_backed_up`·`b_test_matches_now` 값은 이 기록에서 직접 보지 않았습니다). 배포된 복구 경로를 실제 B 계정으로 부른 기록은 아직 없습니다.
 
 ### 복구 뒤 1~9단계 다시 확인 순서
 
 정책을 되돌리거나 메모를 복구한 직후, 아래 순서로 이전 단계의 정상 요청이 그대로 되고 금지 요청이 다시 거부되는지 봅니다.
 
-1. **정책이 돌아왔는지:** `npm run policy:diff` → `변경 범위: 차이 없음`. 차이가 나오면 `npm run policy:restore`로 미리 보고 `-- --apply <해시 12자리>`로 되돌린 뒤 다시 실행합니다.
+1. **정책이 돌아왔는지:** `npm run policy:diff` → 모든 서비스 `사본과 같음`. 다른 서비스가 나오면 `npm run policy:restore -- --service <이름>`으로 미리 보고 `--confirm`을 붙여 그 서비스만 되돌린 뒤 다시 실행합니다.
 2. **판정기(6~9단계):** `npm run decider:test`(통과 6줄), `npm run fixture:7`(`allow`, `step_up`), `npm run detect:test`(통과 6줄).
 3. **서버 API(3·4·10단계):** `npm run owner:check`(통과 9줄), `npm run restore:check`(통과 9줄).
 4. **배포 파일(1·2·5단계):** 아래 「가상 메모 노출 확인 절차」 2번 명령 → `/`·`/index.html`·`/aleph.json`은 `200 memo=False`, `/data.json`은 `404`. 같은 응답에 `X-Content-Type-Options: nosniff`가 있어야 합니다.

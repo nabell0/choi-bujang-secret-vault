@@ -1,0 +1,116 @@
+{
+  "schema": "aleph.test-policy.v1",
+  "note": "가상 시험 정책입니다. 운영 판정기 src/decider.mjs·배포·반 엔진 정책과 연결되지 않으며 비밀값·메모 내용이 없습니다.",
+  "revision": 12,
+  "services": {
+    "notes": {
+      "zone": "personal",
+      "ruleId": "zone.notes_single_item",
+      "methods": [
+        "GET"
+      ],
+      "routes": [
+        "GET /notes/:id"
+      ],
+      "ownerOnly": true,
+      "listAll": false
+    },
+    "notices": {
+      "zone": "class",
+      "ruleId": "zone.notices_read_only",
+      "methods": [
+        "GET"
+      ],
+      "routes": [
+        "GET /notices",
+        "GET /notices/:id"
+      ],
+      "writeAllowed": false
+    },
+    "materials": {
+      "zone": "instructor",
+      "ruleId": "zone.instructor_materials",
+      "methods": [],
+      "routes": []
+    },
+    "devices": {
+      "ruleId": "device_registered",
+      "requireRegistered": true
+    },
+    "stepUp": {
+      "ruleId": "step_up_required",
+      "minAnomalies": 2,
+      "maxStepUpAgeSeconds": 900
+    },
+    "detect": {
+      "reasonCode": "burst_read",
+      "windowSeconds": 600,
+      "burstLimit": 120,
+      "action": "propose_revocation"
+    },
+    "noteRestore": {
+      "route": "POST /api/restore/notes/:id",
+      "ownerOnly": true,
+      "verifyBackupSha256": true,
+      "auditAppendOnly": true
+    }
+  },
+  "audit": [
+    {
+      "at": "2026-10-14T12:18:55+09:00",
+      "action": "service_added",
+      "service": "noteRestore",
+      "toRevision": 10,
+      "note": "10단계 메모 복구 규칙 추가(사본 revision 9 이후의 정상 변경)"
+    },
+    {
+      "at": "2026-10-14T12:18:55+09:00",
+      "action": "simulated_breach",
+      "service": "notes",
+      "toRevision": 11,
+      "note": "침해를 흉내 낸 가상 변경: 소유자 조건 해제, 목록·삭제 허용"
+    },
+    {
+      "at": "2026-10-14T03:20:00.943Z",
+      "action": "policy_restored",
+      "service": "notes",
+      "fromRevision": 11,
+      "toRevision": 12,
+      "safeRevision": 9,
+      "safeSha256": "07b1d17170c25403936d6df9edf8ec9c77e1e1d22072901f3d47b2f56cece660",
+      "changes": [
+        {
+          "key": "methods",
+          "from": [
+            "GET",
+            "DELETE"
+          ],
+          "to": [
+            "GET"
+          ]
+        },
+        {
+          "key": "routes",
+          "from": [
+            "GET /notes",
+            "GET /notes/:id",
+            "DELETE /notes/:id"
+          ],
+          "to": [
+            "GET /notes/:id"
+          ]
+        },
+        {
+          "key": "ownerOnly",
+          "from": false,
+          "to": true
+        },
+        {
+          "key": "listAll",
+          "from": true,
+          "to": false
+        }
+      ]
+    }
+  ]
+}

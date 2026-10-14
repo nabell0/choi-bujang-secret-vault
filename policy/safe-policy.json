@@ -1,83 +1,45 @@
 {
-  "schema": "aleph.policy-snapshot.v1",
-  "version": "9단계 저장점 보완: 탐지 함수",
+  "schema": "aleph.safe-policy.v1",
+  "note": "가상 시험 정책(policy/test-policy.json)의 안전 사본입니다. 운영 판정기 src/decider.mjs가 아니며 비밀값·메모 내용이 없습니다.",
+  "revision": 9,
+  "verifiedAt": "2026-10-14T10:37:04+09:00",
   "sourceCommit": "aae1ff8da82921678931bc46dbbf4c341e026514",
-  "policy": {
-    "ruleIds": [
-      "starter.deny",
-      "device_registered",
-      "step_up_required",
-      "anomaly.off_hours",
-      "anomaly.new_network",
-      "anomaly.region_change",
-      "anomaly.activity_burst",
-      "suspect.network_burst",
-      "zone.notes_single_item",
-      "zone.notices_read_only",
-      "zone.instructor_materials",
-      "zone.default_deny"
-    ],
-    "resources": {
-      "notes.own": {
-        "zone": "personal",
-        "service": "notes",
-        "routes": [
-          "GET /notes",
-          "POST /notes",
-          "GET /notes/:id",
-          "PUT /notes/:id",
-          "DELETE /notes/:id"
-        ]
-      },
-      "notices.class": {
-        "zone": "class",
-        "service": "notices",
-        "routes": [
-          "GET /notices",
-          "POST /notices",
-          "GET /notices/:id",
-          "PUT /notices/:id",
-          "PATCH /notices/:id",
-          "DELETE /notices/:id"
-        ]
-      },
-      "materials.instructor": {
-        "zone": "instructor",
-        "service": "materials",
-        "routes": [
-          "GET /materials",
-          "POST /materials",
-          "GET /materials/:id",
-          "PUT /materials/:id",
-          "PATCH /materials/:id",
-          "DELETE /materials/:id"
-        ]
-      },
-      "notices.admin": {
-        "zone": "admin",
-        "service": "notices_admin",
-        "routes": [
-          "PUT /admin/notices/:id",
-          "DELETE /admin/notices/:id"
-        ]
-      },
-      "app.auth_config": {
-        "zone": "public",
-        "service": "auth",
-        "routes": [
-          "GET /auth-config"
-        ]
-      }
+  "services": {
+    "notes": {
+      "zone": "personal",
+      "ruleId": "zone.notes_single_item",
+      "methods": ["GET"],
+      "routes": ["GET /notes/:id"],
+      "ownerOnly": true,
+      "listAll": false
     },
-    "allowedRoutes": [
-      "GET /api/notes/:id",
-      "GET /api/notices",
-      "GET /api/notices/:id"
-    ],
-    "files": {
-      "src/decider.mjs": "398819c5cae2c9b5030582af6fea2a24bd7a47f118fbb5b31a23138621d8e5b4",
-      "src/detect.mjs": "24625ec5daf14f16cf1ee999a835aada3ae8bf5281d2a5eb71c1297e42c2a064"
+    "notices": {
+      "zone": "class",
+      "ruleId": "zone.notices_read_only",
+      "methods": ["GET"],
+      "routes": ["GET /notices", "GET /notices/:id"],
+      "writeAllowed": false
+    },
+    "materials": {
+      "zone": "instructor",
+      "ruleId": "zone.instructor_materials",
+      "methods": [],
+      "routes": []
+    },
+    "devices": {
+      "ruleId": "device_registered",
+      "requireRegistered": true
+    },
+    "stepUp": {
+      "ruleId": "step_up_required",
+      "minAnomalies": 2,
+      "maxStepUpAgeSeconds": 900
+    },
+    "detect": {
+      "reasonCode": "burst_read",
+      "windowSeconds": 600,
+      "burstLimit": 120,
+      "action": "propose_revocation"
     }
-  },
-  "policySha256": "0fb1a418b1128504b8817e5d83e81c108458a204dfe48da8e24c2c6964b57a24"
+  }
 }

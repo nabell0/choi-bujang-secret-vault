@@ -1,33 +1,22 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-// 침해 전에 검증한 안전 정책 사본과 현재 시험 정책의 차이를 보여 주고, --restore로 그 버전에 되돌립니다.
-// 되돌리는 범위는 정책 파일 두 개와 aleph.config.json의 allowedRoutes뿐입니다. API·다른 설정·Git 이력·DB·배포는
-// 바꾸지 않습니다. 사본은 --create로 새로 만들 때만 쓰고, 있으면 덮어쓰지 않습니다.
+// 가상 시험 정책(policy/test-policy.json)과 침해 전에 검증한 안전 사본(policy/safe-policy.json)을 비교하고,
+// --restore --service <이름> --confirm일 때만 그 서비스 하나의 규칙을 사본 값으로 되돌립니다.
+// 쓰는 파일은 시험 정책 하나뿐입니다. 운영 판정기 src/decider.mjs·src/detect.mjs, 설정, DB, 배포는 읽지도 쓰지도 않습니다.
 const root = resolve(import.meta.dirname, '..');
-const SCHEMA = 'aleph.policy-snapshot.v1';
-const SNAPSHOT_KEYS = ['policy', 'policySha256', 'schema', 'sourceCommit', 'version'];
-const POLICY_KEYS = ['allowedRoutes', 'files', 'resources', 'ruleIds'];
-const POLICY_FILES = ['src/decider.mjs', 'src/detect.mjs'];
-const CONFIG_FILE = 'aleph.config.json';
-const DEFAULT_SNAPSHOT = join(root, 'policy', 'safe-policy.json');
-// 감사 기록은 한 줄씩 덧붙이기만 하고 지우거나 고쳐 쓰지 않습니다.
-const RESTORE_LOG = join(root, 'policy', 'restore-log.jsonl');
-const BACKUP_DIR = join(root, 'artifacts', 'policy-restore');
+const TEST_SCHEMA = 'aleph.test-policy.v1';
+const SAFE_SCHEMA = 'aleph.safe-policy.v1';
+const MANIFEST_SCHEMA = 'aleph.safe-policy-manifest.v1';
 
 class PolicyStop extends Error {}
 const stop = message => { throw new PolicyStop(message); };
-const git = (...args) => execFileSync('git', ['-C', root, ...args], {
-  encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
-  stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
-});
-const gitOk = (...args) => { try { git(...args); return true; } catch { return false; } };
 
-// Git은 LF, Windows 작업 폴더는 CRLF로 둘 수 있어 줄바꿈을 맞춘 뒤 해시합니다.
+// Windows 작업 폴더는 CRLF일 수 있어 줄바꿈을 LF로 맞춘 뒤 해시합니다.
 const lf = text => text.replace(/\r\n/gu, '\n');
-const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
+const sha256 = text => createHash('sha256').update(lf(text), 'utf8').digest('hex');
 const canonical = value => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -35,210 +24,166 @@ const canonical = value => {
   }
   return JSON.stringify(value);
 };
-const isHex = (value, length) => typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`, 'u').test(value);
-const isStringList = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+const same = (a, b) => canonical(a) === canonical(b);
+const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const clone = value => JSON.parse(JSON.stringify(value));
+const shown = path => relative(root, path) || path;
 
-// 정책 = 판정기 규칙 이름·자원 구역, 설정의 허용 경로, 정책 파일의 내용 해시.
-async function buildPolicy(read) {
-  const deciderSource = read('src/decider.mjs');
-  const decider = await import(`data:text/javascript;base64,${Buffer.from(deciderSource, 'utf8').toString('base64')}`);
-  if (!isStringList(decider.RULE_IDS)) stop('src/decider.mjs의 RULE_IDS를 읽을 수 없습니다.');
-  const config = JSON.parse(read('aleph.config.json'));
+export function defaultPaths() {
   return {
-    ruleIds: [...decider.RULE_IDS],
-    resources: JSON.parse(JSON.stringify(decider.RESOURCES ?? {})),
-    allowedRoutes: isStringList(config.allowedRoutes) ? [...config.allowedRoutes] : [],
-    files: Object.fromEntries(POLICY_FILES.map(path => [path, sha256(lf(read(path)))])),
+    policy: resolve(root, 'policy', 'test-policy.json'),
+    safe: resolve(root, 'policy', 'safe-policy.json'),
+    manifest: resolve(root, 'policy', 'safe-policy.manifest.json'),
   };
 }
 
-const readAtCommit = commit => path => {
-  try { return git('show', `${commit}:${path}`); } catch { return stop(`커밋 ${commit.slice(0, 7)}에 ${path}가 없습니다.`); }
-};
-const readWorkingTree = path => readFileSync(join(root, path), 'utf8');
+const readText = (path, missing) => (existsSync(path) ? readFileSync(path, 'utf8') : stop(missing));
+const parse = (text, label) => { try { return JSON.parse(text); } catch { return stop(`${label}이 JSON이 아닙니다.`); } };
 
-function resolveCommit(ref) {
-  if (typeof ref !== 'string' || !/^[0-9a-f]{7,40}$/u.test(ref)) stop('커밋 번호(16진수 7~40자)를 적어 주세요.');
-  if (!gitOk('cat-file', '-e', `${ref}^{commit}`)) stop(`커밋 ${ref}를 이 저장소에서 찾을 수 없습니다.`);
-  const commit = git('rev-parse', '--verify', `${ref}^{commit}`).trim();
-  if (!gitOk('merge-base', '--is-ancestor', commit, 'HEAD')) stop(`커밋 ${commit.slice(0, 7)}가 현재 HEAD의 이력에 없습니다.`);
-  return commit;
-}
-
-function checkShape(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
-      || Object.keys(snapshot).sort().join(',') !== SNAPSHOT_KEYS.join(',')) stop('사본의 항목 이름이 형식과 다릅니다.');
-  if (snapshot.schema !== SCHEMA) stop(`사본 형식이 ${SCHEMA}가 아닙니다.`);
-  if (typeof snapshot.version !== 'string' || !snapshot.version.trim() || snapshot.version.length > 120) {
-    stop('사본의 version이 비었거나 너무 깁니다.');
+// 사본은 따로 적어 둔 기록(manifest)의 SHA-256·버전과 모두 맞아야 씁니다.
+function loadSafe(paths) {
+  const manifest = parse(readText(paths.manifest, `사본 기록(${shown(paths.manifest)})을 읽지 못했습니다.`), '사본 기록');
+  if (!isRecord(manifest) || manifest.schema !== MANIFEST_SCHEMA || !/^[0-9a-f]{64}$/u.test(manifest.sha256 ?? '')) {
+    stop('사본 기록의 형식이 맞지 않습니다.');
   }
-  if (!isHex(snapshot.sourceCommit, 40)) stop('사본의 sourceCommit이 40자리 커밋 번호가 아닙니다.');
-  if (!isHex(snapshot.policySha256, 64)) stop('사본의 policySha256이 64자리 SHA-256이 아닙니다.');
-  const { policy } = snapshot;
-  if (!policy || typeof policy !== 'object' || Array.isArray(policy)
-      || Object.keys(policy).sort().join(',') !== POLICY_KEYS.join(',')
-      || !isStringList(policy.ruleIds) || !isStringList(policy.allowedRoutes)
-      || !policy.resources || typeof policy.resources !== 'object' || Array.isArray(policy.resources)
-      || !policy.files || Object.keys(policy.files).sort().join(',') !== [...POLICY_FILES].sort().join(',')
-      || !Object.values(policy.files).every(value => isHex(value, 64))) stop('사본의 policy 내용이 형식과 다릅니다.');
-}
-
-async function verifySnapshot(path) {
-  const shown = relative(root, path) || path;
-  if (!existsSync(path)) stop(`안전 정책 사본(${shown})이 없습니다.`);
-  let snapshot;
-  try { snapshot = JSON.parse(readFileSync(path, 'utf8')); } catch { stop(`안전 정책 사본(${shown})이 JSON이 아닙니다.`); }
-  checkShape(snapshot);
-  if (sha256(canonical(snapshot.policy)) !== snapshot.policySha256) stop('사본의 policy 해시가 policySha256과 다릅니다.');
-  const commit = resolveCommit(snapshot.sourceCommit);
-  const original = await buildPolicy(readAtCommit(commit));
-  if (canonical(original) !== canonical(snapshot.policy)) {
-    stop(`사본 내용이 커밋 ${commit.slice(0, 7)}의 실제 정책과 다릅니다.`);
+  const text = readText(paths.safe, `안전 정책 사본(${shown(paths.safe)})이 없습니다.`);
+  const actual = sha256(text);
+  if (actual !== manifest.sha256) stop('안전 정책 사본의 SHA-256이 기록과 다릅니다(사본 검증 실패).');
+  const safe = parse(text, '안전 정책 사본');
+  if (!isRecord(safe) || safe.schema !== SAFE_SCHEMA || !isRecord(safe.services)) stop('안전 정책 사본의 형식이 맞지 않습니다.');
+  if (safe.revision !== manifest.revision || safe.verifiedAt !== manifest.verifiedAt) {
+    stop('안전 정책 사본의 버전·검증 시각이 기록과 다릅니다.');
   }
-  return { snapshot, shown };
+  return { safe, sha: actual };
 }
 
-const listDiff = (before, after) => ({
-  added: after.filter(item => !before.includes(item)),
-  removed: before.filter(item => !after.includes(item)),
-});
+function loadTest(paths) {
+  const text = readText(paths.policy, `시험 정책(${shown(paths.policy)})이 없습니다.`);
+  const policy = parse(text, '시험 정책');
+  if (!isRecord(policy) || policy.schema !== TEST_SCHEMA || !isRecord(policy.services) || !Array.isArray(policy.audit)
+      || !Number.isInteger(policy.revision)) stop('시험 정책의 형식이 맞지 않습니다.');
+  return { policy, text, sha: sha256(text) };
+}
 
-function policyDiff(safe, current, commit) {
+// 서비스 하나의 규칙 항목별 차이: 지금 값 → 사본 값.
+function ruleChanges(current = {}, safe = {}) {
+  return [...new Set([...Object.keys(current), ...Object.keys(safe)])]
+    .filter(key => !same(current[key], safe[key]))
+    .map(key => ({ key, from: current[key] ?? null, to: safe[key] ?? null }));
+}
+
+// 가상 요청 하나를 메모 규칙으로 판단합니다. 실제 API의 소유자 검사(api/notes/[id].js)와는 따로입니다.
+export function noteReadDecision(rules, { route, requester, owner }) {
+  if (!isRecord(rules) || !Array.isArray(rules.routes) || !rules.routes.includes(route)) return 'deny';
+  if (rules.ownerOnly !== false && requester !== owner) return 'deny';
+  return 'allow';
+}
+
+const show = value => JSON.stringify(value);
+const decisionLines = rules => [
+  `  B의 A 메모 읽기(GET /notes/:id): ${noteReadDecision(rules, { route: 'GET /notes/:id', requester: 'B', owner: 'A' }) === 'allow' ? '허용' : '거부'}`,
+  `  A의 자기 메모 읽기(GET /notes/:id): ${noteReadDecision(rules, { route: 'GET /notes/:id', requester: 'A', owner: 'A' }) === 'allow' ? '허용' : '거부'}`,
+  `  메모 목록(GET /notes): ${noteReadDecision(rules, { route: 'GET /notes', requester: 'A', owner: 'A' }) === 'allow' ? '허용' : '거부'}`,
+];
+
+function compare(safe, policy) {
   const lines = [];
-  const rules = listDiff(safe.ruleIds, current.ruleIds);
-  for (const id of rules.added) lines.push(`  + 현재에만 있는 규칙 (복원하면 빠짐): ${id}`);
-  for (const id of rules.removed) lines.push(`  - 사본에만 있는 규칙 (복원하면 돌아옴): ${id}`);
-  const routes = listDiff(safe.allowedRoutes, current.allowedRoutes);
-  for (const route of routes.added) lines.push(`  + 현재에만 있는 허용 경로 (복원하면 빠짐): ${route}`);
-  for (const route of routes.removed) lines.push(`  - 사본에만 있는 허용 경로 (복원하면 돌아옴): ${route}`);
-  for (const id of new Set([...Object.keys(safe.resources), ...Object.keys(current.resources)])) {
-    if (!(id in safe.resources)) lines.push(`  + 현재에만 있는 자원 (복원하면 빠짐): ${id}`);
-    else if (!(id in current.resources)) lines.push(`  - 사본에만 있는 자원 (복원하면 돌아옴): ${id}`);
-    else if (canonical(safe.resources[id]) !== canonical(current.resources[id])) {
-      lines.push(`  ~ 구역·경로가 다른 자원 (복원하면 사본 값으로): ${id}`);
-    }
+  for (const service of Object.keys(policy.services)) {
+    if (!(service in safe.services)) { lines.push(`  ${service}: 사본에 없는 서비스 (되돌리지 않고 그대로 둠)`); continue; }
+    const changes = ruleChanges(policy.services[service], safe.services[service]);
+    if (!changes.length) { lines.push(`  ${service}: 사본과 같음`); continue; }
+    lines.push(`  ${service}: ${changes.length}개 항목이 사본과 다름`);
+    for (const { key, from, to } of changes) lines.push(`    ${key}: ${show(from)} → ${show(to)}`);
   }
-  for (const path of POLICY_FILES) {
-    if (safe.files[path] === current.files[path]) continue;
-    const [added = '?', removed = '?'] = git('diff', '--numstat', commit, '--', path).trim().split(/\s+/u);
-    lines.push(`  ~ 사본과 다른 정책 파일 (복원하면 사본 내용으로): ${path} (사본 대비 +${added} -${removed}줄)`);
+  for (const service of Object.keys(safe.services)) {
+    if (!(service in policy.services)) lines.push(`  ${service}: 시험 정책에서 빠짐 (복원하면 사본 값으로 다시 생김)`);
   }
   return lines;
 }
 
-async function createSnapshot(ref, path) {
-  if (existsSync(path)) stop(`${relative(root, path)}가 이미 있습니다. 검증한 사본은 덮어쓰지 않습니다.`);
-  const commit = resolveCommit(ref);
-  const policy = await buildPolicy(readAtCommit(commit));
-  const version = git('log', '-1', '--format=%s', commit).trim().slice(0, 120) || commit.slice(0, 7);
-  const snapshot = { schema: SCHEMA, version, sourceCommit: commit, policy, policySha256: sha256(canonical(policy)) };
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-  process.stdout.write(`안전 정책 사본 생성: ${relative(root, path)}\n버전: ${version} (커밋 ${commit.slice(0, 7)})\n`
-    + `규칙 ${policy.ruleIds.length}개 · 허용 경로 ${policy.allowedRoutes.length}개 · 정책 해시 ${snapshot.policySha256.slice(0, 12)}\n`);
-}
-
-async function showDiff(path) {
-  const { snapshot, shown } = await verifySnapshot(path);
-  const current = await buildPolicy(readWorkingTree);
-  const head = git('rev-parse', '--short', 'HEAD').trim();
-  const lines = policyDiff(snapshot.policy, current, snapshot.sourceCommit);
-  process.stdout.write([
-    `안전 정책 사본 검증 통과: ${shown}`,
-    `복원할 버전: ${snapshot.version} (커밋 ${snapshot.sourceCommit.slice(0, 7)}, 정책 해시 ${snapshot.policySha256.slice(0, 12)})`,
-    `현재 시험 정책: 작업 폴더 (HEAD ${head}, 커밋하지 않은 변경 포함)`,
-    lines.length ? `변경 범위 ${lines.length}건:` : '변경 범위: 차이 없음. 복원할 것이 없습니다.',
-    ...lines,
-    lines.length ? `파일 내용은 git diff ${snapshot.sourceCommit.slice(0, 7)} -- src/decider.mjs src/detect.mjs 로 볼 수 있습니다.` : null,
-    '이 명령은 비교만 하며 파일·DB·배포·운영 정책을 바꾸지 않았습니다.',
-  ].filter(Boolean).join('\n') + '\n');
-}
-
-const restoreTargets = (safe, current) => [
-  ...POLICY_FILES.filter(path => safe.files[path] !== current.files[path]),
-  ...(canonical(safe.allowedRoutes) !== canonical(current.allowedRoutes) ? [CONFIG_FILE] : []),
+const header = (safe, sha, paths) => [
+  `안전 정책 사본 검증: SHA-256 일치 (${shown(paths.safe)}, ${sha.slice(0, 12)})`,
+  `복원할 버전: revision ${safe.revision} · 검증 시각 ${safe.verifiedAt} · 기준 커밋 ${String(safe.sourceCommit).slice(0, 7)}`,
 ];
-const describeTarget = (path, commit) => (path === CONFIG_FILE
-  ? `  ${CONFIG_FILE}: allowedRoutes만 사본 값으로 (다른 설정 항목은 그대로)`
-  : `  ${path}: 파일 전체를 커밋 ${commit.slice(0, 7)}의 내용으로`);
-const KEPT = '그대로 두는 것: api/ 서버 함수와 메모 소유자 검사, aleph.config.json의 다른 항목, Git 이력, '
-  + 'policy/restore-log.jsonl의 기존 기록, DB·배포';
-// 작업 폴더 파일의 줄바꿈(CRLF/LF)을 유지해 Git에 내용 없는 변경이 생기지 않게 합니다.
-const withEolOf = (text, existing) => (existing.includes('\r\n') ? lf(text).replace(/\n/gu, '\r\n') : lf(text));
 
-async function previewRestore(path) {
-  const { snapshot, shown } = await verifySnapshot(path);
-  const current = await buildPolicy(readWorkingTree);
-  const lines = policyDiff(snapshot.policy, current, snapshot.sourceCommit);
-  const targets = restoreTargets(snapshot.policy, current);
-  const out = [
-    `안전 정책 사본 검증 통과: ${shown}`,
-    `복원할 버전: ${snapshot.version} (커밋 ${snapshot.sourceCommit.slice(0, 7)}, 정책 해시 ${snapshot.policySha256.slice(0, 12)})`,
+export function showDiff(paths = defaultPaths()) {
+  const { safe, sha } = loadSafe(paths);
+  const { policy } = loadTest(paths);
+  return [
+    ...header(safe, sha, paths),
+    `지금의 시험 정책: ${shown(paths.policy)} (revision ${policy.revision}, 감사 이력 ${policy.audit.length}줄)`,
+    '서비스별 규칙:', ...compare(safe, policy),
+    '지금 메모 규칙으로 판단한 가상 요청:', ...decisionLines(policy.services.notes),
+    '비교만 했습니다. 시험 정책·운영 판정기·설정·DB·배포를 바꾸지 않았습니다.',
   ];
-  if (!targets.length) {
-    out.push('바뀔 항목: 없음. 현재 시험 정책이 사본과 같아 복원할 것이 없습니다.');
-  } else {
-    out.push(`바뀔 항목 ${lines.length}건:`, ...lines, '바뀔 파일:', ...targets.map(item => describeTarget(item, snapshot.sourceCommit)),
-      KEPT, `미리보기만 했고 아무것도 바꾸지 않았습니다. 적용하려면: npm run policy:restore -- --apply ${snapshot.policySha256.slice(0, 12)}`);
-  }
-  process.stdout.write(`${out.join('\n')}\n`);
 }
 
-async function applyRestore(path, confirm) {
-  const { snapshot } = await verifySnapshot(path);
-  if (confirm !== snapshot.policySha256.slice(0, 12)) {
-    stop('확인 값이 사본의 정책 해시 앞 12자리와 다릅니다. 먼저 npm run policy:restore로 바뀔 항목을 확인해 주세요.');
+export function restoreService(service, confirm, paths = defaultPaths()) {
+  if (typeof service !== 'string' || !service) stop('--service <서비스 이름>으로 되돌릴 서비스 하나를 지정해 주세요.');
+  const first = loadSafe(paths);
+  const firstTest = loadTest(paths);
+  if (!(service in first.safe.services)) stop(`안전 정책 사본에 ${service} 서비스가 없습니다. 되돌릴 기준이 없어 중단합니다.`);
+  const changes = ruleChanges(firstTest.policy.services[service], first.safe.services[service]);
+  const kept = Object.keys(firstTest.policy.services).filter(name => name !== service);
+  const out = [
+    ...header(first.safe, first.sha, paths),
+    `되돌릴 서비스: ${service} (${changes.length}개 항목)`,
+    ...changes.map(({ key, from, to }) => `  ${key}: ${show(from)} → ${show(to)}`),
+    `그대로 둘 서비스: ${kept.join(', ') || '없음'} · 감사 이력 ${firstTest.policy.audit.length}줄 보존`,
+  ];
+  if (!changes.length) return [...out, `${service} 규칙이 이미 사본과 같아 아무것도 바꾸지 않았습니다.`];
+  if (!confirm) return [...out, `미리보기만 했고 아무것도 바꾸지 않았습니다. 되돌리려면: npm run policy:restore -- --service ${service} --confirm`];
+
+  // 쓰기 직전에 사본과 시험 정책을 다시 읽어, 미리보기 때와 같을 때만 씁니다.
+  const again = loadSafe(paths);
+  const now = loadTest(paths);
+  if (again.sha !== first.sha || now.sha !== firstTest.sha) stop('미리보기 뒤 사본이나 시험 정책이 바뀌었습니다. 복원을 중단합니다.');
+
+  const before = now.policy;
+  const entry = {
+    at: new Date().toISOString(), action: 'policy_restored', service,
+    fromRevision: before.revision, toRevision: before.revision + 1,
+    safeRevision: again.safe.revision, safeSha256: again.sha, changes,
+  };
+  const next = {
+    ...before, revision: before.revision + 1,
+    services: { ...before.services, [service]: clone(again.safe.services[service]) },
+    audit: [...before.audit, entry],
+  };
+  const body = `${JSON.stringify(next, null, 2)}\n`;
+  writeFileSync(paths.policy, now.text.includes('\r\n') ? body.replace(/\n/gu, '\r\n') : body, 'utf8');
+
+  const after = loadTest(paths).policy;
+  const othersKept = Object.keys(before.services).filter(name => name !== service)
+    .every(name => same(after.services[name], before.services[name]));
+  const verified = same(after.services[service], again.safe.services[service]) && othersKept
+    && after.audit.length === before.audit.length + 1 && same(after.audit.slice(0, before.audit.length), before.audit);
+  if (!verified) {
+    writeFileSync(paths.policy, now.text, 'utf8');
+    stop('복원 뒤 확인에 실패해 시험 정책을 복원 전 내용으로 되돌렸습니다.');
   }
-  const before = await buildPolicy(readWorkingTree);
-  const lines = policyDiff(snapshot.policy, before, snapshot.sourceCommit);
-  const targets = restoreTargets(snapshot.policy, before);
-  if (!targets.length) {
-    process.stdout.write('바뀔 항목이 없어 복원하지 않았습니다.\n');
-    return;
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
-  const backup = join(BACKUP_DIR, stamp);
-  const fromCommit = readAtCommit(snapshot.sourceCommit);
-  for (const file of targets) {
-    const existing = readWorkingTree(file);
-    mkdirSync(dirname(join(backup, file)), { recursive: true });
-    writeFileSync(join(backup, file), existing, { encoding: 'utf8', flag: 'wx' });
-    const restored = file === CONFIG_FILE
-      ? `${JSON.stringify({ ...JSON.parse(existing), allowedRoutes: [...snapshot.policy.allowedRoutes] }, null, 2)}\n`
-      : fromCommit(file);
-    writeFileSync(join(root, file), withEolOf(restored, existing), 'utf8');
-  }
-  const after = await buildPolicy(readWorkingTree);
-  const verified = canonical(after) === canonical(snapshot.policy);
-  mkdirSync(dirname(RESTORE_LOG), { recursive: true });
-  appendFileSync(RESTORE_LOG, `${JSON.stringify({
-    at: new Date().toISOString(), result: verified ? 'restored' : 'verify_failed',
-    version: snapshot.version, sourceCommit: snapshot.sourceCommit, policySha256: snapshot.policySha256,
-    head: git('rev-parse', 'HEAD').trim(), files: targets, changes: lines.map(line => line.trim()),
-  })}\n`, 'utf8');
-  const kept = relative(root, backup);
-  if (!verified) stop(`복원 뒤 정책이 사본과 다릅니다. 복원 전 파일은 ${kept}에 있습니다.`);
-  process.stdout.write([
-    `복원 완료: ${snapshot.version} (커밋 ${snapshot.sourceCommit.slice(0, 7)}) · 복원 뒤 정책이 사본과 같음을 확인했습니다.`,
-    '바뀐 파일:', ...targets.map(item => describeTarget(item, snapshot.sourceCommit)),
-    KEPT,
-    `복원 전 파일: ${kept} (Git 제외) · 감사 기록: ${relative(root, RESTORE_LOG)}에 한 줄 추가`,
-    '다음으로 npm run decider:test, npm run detect:test, npm run owner:check를 실행해 규칙과 소유자 검사를 확인하세요.',
-  ].join('\n') + '\n');
+  return [
+    ...out,
+    `복원 완료: ${service} 규칙이 사본(revision ${again.safe.revision})과 같습니다. 시험 정책 revision ${before.revision} → ${after.revision}`,
+    `확인: 다른 서비스 규칙 그대로 · 이전 감사 이력 ${before.audit.length}줄 그대로 · 감사 이력 한 줄(policy_restored) 추가`,
+    ...(service === 'notes' ? ['복원 뒤 메모 규칙으로 판단한 가상 요청:', ...decisionLines(after.services.notes)] : []),
+    `쓴 파일: ${shown(paths.policy)} 하나. 운영 판정기 src/decider.mjs·src/detect.mjs, 설정, DB, 배포는 건드리지 않았습니다.`,
+  ];
 }
 
-try {
-  const args = process.argv.slice(2);
-  const at = args.indexOf('--snapshot');
-  const path = at >= 0 && args[at + 1] ? resolve(args[at + 1]) : DEFAULT_SNAPSHOT;
-  const create = args.indexOf('--create');
-  const apply = args.indexOf('--apply');
-  if (create >= 0) await createSnapshot(args[create + 1], path);
-  else if (apply >= 0) await applyRestore(path, args[apply + 1]);
-  else if (args.includes('--restore')) await previewRestore(path);
-  else await showDiff(path);
-} catch (error) {
-  const message = error instanceof PolicyStop ? error.message : '정책을 읽는 중 예상하지 못한 오류가 났습니다.';
-  process.stderr.write(`중단: ${message}\n비교·복원을 여기서 멈췄습니다.\n`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const args = process.argv.slice(2);
+    const option = (name, fallback) => { const at = args.indexOf(name); return at >= 0 && args[at + 1] ? resolve(args[at + 1]) : fallback; };
+    const defaults = defaultPaths();
+    const paths = { policy: option('--policy', defaults.policy), safe: option('--safe', defaults.safe), manifest: option('--manifest', defaults.manifest) };
+    const at = args.indexOf('--service');
+    const service = at >= 0 ? args[at + 1] : undefined;
+    const lines = args.includes('--restore') ? restoreService(service, args.includes('--confirm'), paths) : showDiff(paths);
+    process.stdout.write(`${lines.join('\n')}\n`);
+  } catch (error) {
+    const message = error instanceof PolicyStop ? error.message : '정책을 읽는 중 예상하지 못한 오류가 났습니다.';
+    process.stderr.write(`중단: ${message}\n복원을 중단합니다. 시험 정책은 바뀌지 않았습니다.\n`);
+    process.exitCode = 1;
+  }
 }
