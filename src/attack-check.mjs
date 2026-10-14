@@ -320,7 +320,7 @@ async function runStep11Checks(app, config) {
       observed: challenge
         ? `토큰 없는 GET /api/device/challenge: HTTP ${challenge.status}, JSON ${challenge.json ? '예' : '아니오'}, 오류 ${challenge.errorCode ?? '없음'}`
         : '토큰 없는 GET /api/device/challenge: 요청 실패' },
-    { attackId: 'app_signature_tampering', expected: '로그인만 하고 기기 서명 없이 보호 요청, 서명 뒤 경로 변경, 서명 뒤 수정 본문 변경이 모두 403 DEVICE_* JSON 오류로 거부되고 메모가 그대로임',
+    { attackId: 'app_signature_tampering', expected: '로그인만 하고 기기 서명 없이 보호 요청은 403 device_not_registered, 서명 뒤 경로 변경·수정 본문 변경은 403 DEVICE_SIGNATURE_INVALID JSON 오류로 거부되고 메모가 그대로임',
       observed: '미실행: 실제 로그인 토큰과 등록부에서 승인한 기기의 패스키가 필요해 보내지 않음(토큰·키를 기록하지 않음)' },
   ];
 }

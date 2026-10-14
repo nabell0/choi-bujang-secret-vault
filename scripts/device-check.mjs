@@ -142,9 +142,16 @@ const checks = [
     const [challenge, list] = await Promise.all([device('challenge', 'GET'), call(notesApi, { url: '/api/notes' })]);
     return challenge.statusCode === 401 && list.statusCode === 401 && list.body?.error === 'LOGIN_REQUIRED';
   }],
-  ['설치형 앱 서명 없이 보호 요청: 로그인만 한 A의 메모 목록 403 DEVICE_SIGNATURE_REQUIRED, 메모 없음', async () => {
+  ['설치형 앱 서명 없이 보호 요청: 로그인만 한 A의 메모 목록 403 device_not_registered(판정기), 메모 없음', async () => {
     const r = await call(notesApi, { url: '/api/notes', login: A });
-    return r.statusCode === 403 && r.body?.error === 'DEVICE_SIGNATURE_REQUIRED' && !Array.isArray(r.body);
+    return r.statusCode === 403 && r.body?.error === 'device_not_registered' && !Array.isArray(r.body);
+  }],
+  ['설치·승인 표시만 붙인 보호 요청(가짜 머리글): 403 device_not_registered, 메모 없음', async () => {
+    const r = await call(notesApi, { url: '/api/notes', login: A, headers: {
+      'x-app-installed': 'true', 'x-device-approved': 'true', 'x-device-session': 'approved',
+      'x-aleph-device-session': 'approved', 'x-aleph-signature': 'badge', 'x-aleph-signed-at': new Date().toISOString(),
+      'x-aleph-nonce': 'badgebadgebadgebadge' } });
+    return r.statusCode === 403 && r.body?.error === 'device_not_registered' && !Array.isArray(r.body);
   }],
   ['승인 요청은 pending만 만듦: 본문에 status approved를 넣어도 pending', async () => {
     const r = await requestApproval(A, passkeyA, { status: 'approved' });
@@ -210,27 +217,27 @@ const checks = [
       headers: signedHeaders(proofA, 'GET', path) });
     return r.statusCode === 403 && Boolean(noteOf(NOTE_A));
   }],
-  ['B가 A의 기기 확인 결과·서명으로 요청 403 DEVICE_NOT_REGISTERED', async () => {
+  ['B가 A의 기기 확인 결과·서명으로 요청 403 device_not_registered', async () => {
     const r = await call(notesApi, { url: '/api/notes', login: B, headers: signedHeaders(proofA, 'GET', '/api/notes') });
-    return r.statusCode === 403 && r.body?.error === 'DEVICE_NOT_REGISTERED';
+    return r.statusCode === 403 && r.body?.error === 'device_not_registered';
   }],
   ['2분 전에 만든 서명 403 DEVICE_SIGNATURE_EXPIRED', async () => {
     const r = await call(notesApi, { url: '/api/notes', login: A,
       headers: signedHeaders(proofA, 'GET', '/api/notes', undefined, { signedAt: new Date(Date.now() - 120000).toISOString() }) });
     return r.statusCode === 403 && r.body?.error === 'DEVICE_SIGNATURE_EXPIRED';
   }],
-  ['위조한 기기 확인 결과 403 DEVICE_NOT_REGISTERED', async () => {
+  ['위조한 기기 확인 결과 403 device_not_registered', async () => {
     const [body, mac] = proofA.session.split('.');
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
     const forged = `${b64url(JSON.stringify({ ...payload, exp: Date.now() + 3600000 }))}.${mac}`;
     const r = await call(notesApi, { url: '/api/notes', login: A, headers: signedHeaders({ ...proofA, session: forged }, 'GET', '/api/notes') });
-    return r.statusCode === 403 && r.body?.error === 'DEVICE_NOT_REGISTERED';
+    return r.statusCode === 403 && r.body?.error === 'device_not_registered';
   }],
   ['등록부에서 승인을 거두면 다음 요청부터 403(판정기 device_not_registered)', async () => {
     db.device_registrations[0].status = 'revoked';
     const r = await call(notesApi, { url: '/api/notes', login: A, headers: signedHeaders(proofA, 'GET', '/api/notes') });
     db.device_registrations[0].status = 'approved';
-    return r.statusCode === 403 && r.body?.error === 'DEVICE_NOT_REGISTERED';
+    return r.statusCode === 403 && r.body?.error === 'device_not_registered';
   }],
   ['판정기: 정상 요청 allow, 미등록 deny, 경로 모양이 다른 요청·쿼리 지문이 맞지 않는 요청 거부, ruleIds 모두 RULE_IDS 안', async () => {
     const { normal } = fixtureRequests();

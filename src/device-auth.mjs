@@ -202,25 +202,34 @@ const resourceService = id => ({ 'notes.own': 'notes', 'notices.class': 'notices
 // 보호 자료 API가 로그인 확인 다음, 자료를 읽거나 쓰기 전에 부릅니다. false면 JSON 오류를 이미 보냈습니다.
 export async function requireApprovedDevice(request, response, login, apiPath) {
   const refuse = (error, message) => { sendError(response, 403, error, message); return false; };
+  const userId = login.userId.toLowerCase();
+  let target;
+  try { target = new URL(request.url ?? '', 'https://app.invalid'); } catch { target = new URL('https://app.invalid/'); }
+  // 기기 확인 결과·요청 서명이 없거나 서버가 봉한 값이 아니면 등록 기기가 아닌 것으로 판정기에 묻고 거부합니다.
+  // 화면 표시·설치 여부·요청 머리글의 다른 값은 근거로 쓰지 않습니다.
+  const judgeDevice = async (deviceId, registered) => decide(decisionRequest({
+    method: String(request.method).toUpperCase(), apiPath, pathname: target.pathname, search: target.search,
+    userId, deviceId, registered,
+  }));
+  const notRegistered = async deviceId => {
+    await judgeDevice(deviceId ?? sha256Hex('none').slice(0, 16), false);
+    return refuse('device_not_registered', '서버가 이 기기를 등록·승인된 기기로 확인하지 않았습니다.');
+  };
   const session = header(request, 'x-aleph-device-session');
   const signature = header(request, 'x-aleph-signature');
   const signedAt = header(request, 'x-aleph-signed-at');
   const nonce = header(request, 'x-aleph-nonce');
-  if (!session || !signature || !signedAt || !nonce) {
-    return refuse('DEVICE_SIGNATURE_REQUIRED', '승인된 기기의 요청 서명이 필요합니다.');
+  const device = session ? open(session, 'session', userId) : null;
+  if (!device || !DEVICE_ID.test(device.d ?? '') || !signature || !signedAt || !nonce) {
+    return notRegistered(device && DEVICE_ID.test(device.d ?? '') ? device.d : null);
   }
-  const userId = login.userId.toLowerCase();
-  const device = open(session, 'session', userId);
-  if (!device || !DEVICE_ID.test(device.d ?? '')) return refuse('DEVICE_NOT_REGISTERED', '승인된 기기로 확인되지 않았습니다.');
   const at = Date.parse(signedAt);
   if (!Number.isFinite(at) || Math.abs(Date.now() - at) > SIGNATURE_SKEW_MS || !NONCE.test(nonce)) {
     return refuse('DEVICE_SIGNATURE_EXPIRED', '요청 서명 시각이 맞지 않습니다.');
   }
-  let target;
-  try { target = new URL(request.url ?? '', 'https://app.invalid'); } catch { target = null; }
   const signatureBytes = fromB64url(signature, 256);
   let valid = false;
-  if (target && signatureBytes) {
+  if (signatureBytes) {
     const message = [SIGNED_REQUEST, String(request.method).toUpperCase(), `${target.pathname}${target.search}`,
       sha256Hex(signedBody(request)), signedAt, nonce].join('\n');
     try {
@@ -232,12 +241,9 @@ export async function requireApprovedDevice(request, response, login, apiPath) {
 
   const { data, error } = await deviceTable().select('status').eq('device_id', device.d).eq('owner_id', userId).limit(1);
   if (error) { dbFailure(response, error, 'DEVICE_REGISTRY_UNAVAILABLE'); return false; }
-  const decision = await decide(decisionRequest({
-    method: String(request.method).toUpperCase(), apiPath, pathname: target.pathname, search: target.search,
-    userId, deviceId: device.d, registered: data[0]?.status === 'approved',
-  }));
+  const decision = await judgeDevice(device.d, data[0]?.status === 'approved');
   if (decision.decision === 'deny' && ['device_not_registered', 'starter_not_ready'].includes(decision.reasonCode)) {
-    return refuse('DEVICE_NOT_REGISTERED', '승인된 기기로 확인되지 않았습니다.');
+    return refuse('device_not_registered', '서버가 이 기기를 등록·승인된 기기로 확인하지 않았습니다.');
   }
   return true;
 }

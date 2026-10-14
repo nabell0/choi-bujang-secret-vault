@@ -185,9 +185,10 @@ function zoneVerdict({ method, service, route, path, queryLength }) {
   return { allowed: true, ruleId: zone.ruleId };
 }
 
+// 요청이 객체가 아니거나 requestId가 없어도 다섯 항목이 모두 있는 응답을 돌려줍니다.
 const respond = (request, decision, reasonCode, ruleIds) => ({
   schema: 'aleph.decision.v1',
-  requestId: request?.requestId,
+  requestId: isRecord(request) && request.requestId !== undefined ? request.requestId : null,
   decision,
   reasonCode,
   ruleIds,
