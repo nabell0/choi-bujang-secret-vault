@@ -1,6 +1,6 @@
 // GET /api/auth-config: the browser login settings, read at runtime from Vercel environment variables
 // so no Supabase key is written into static files. Only the public (publishable/anon) key may leave here.
-import { sendError } from '../src/notes-server.mjs';
+import { markResource, sendError } from '../src/notes-server.mjs';
 
 const roleOf = key => {
   try {
@@ -15,6 +15,7 @@ const isPublicKey = key => key.startsWith('sb_publishable_')
 
 export default function handler(request, response) {
   response.setHeader('Cache-Control', 'no-store');
+  markResource(request, response, '/api/auth-config');
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     return sendError(response, 405, 'METHOD_NOT_ALLOWED');

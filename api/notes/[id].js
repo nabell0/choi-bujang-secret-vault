@@ -1,10 +1,12 @@
 // GET/PUT/DELETE /api/notes/:id
 // Only the owner may read, change, or delete a note: every query is filtered by owner_id = the verified user ID.
 import {
-  UUID, dbFailure, notesTable, readNoteInput, refuseOwnerChange, requestsOtherOwner, requireLogin, sendError, toNote,
+  UUID, dbFailure, markResource, notesTable, readNoteInput, refuseOwnerChange, requestsOtherOwner, requireLogin,
+  sendError, toNote,
 } from '../../src/notes-server.mjs';
 
 export default async function handler(request, response) {
+  markResource(request, response, '/api/notes/:id');
   const login = await requireLogin(request, response);
   if (!login) return;
 

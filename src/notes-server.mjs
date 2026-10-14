@@ -2,6 +2,7 @@
 // identity comes from the verified token alone and request userId/role/owner_id values are never read.
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
+import { resourceForApiRoute } from './decider.mjs';
 import { createLoginVerifier } from './verify-login.mjs';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -13,6 +14,13 @@ let supabase;
 
 export function sendError(response, status, error, message) {
   return response.status(status).json(message ? { error, message } : { error });
+}
+
+// Labels every response, including login errors, with the resource ID the decider uses for the same route.
+export function markResource(request, response, apiPath) {
+  const resource = resourceForApiRoute(request.method, apiPath);
+  if (resource) response.setHeader('X-Aleph-Resource', `${resource.id}; zone=${resource.zone}`);
+  return resource;
 }
 
 // Returns the verified login, or null after a JSON error response has been sent.
@@ -50,13 +58,30 @@ export async function requireLogin(request, response) {
 }
 
 export const notesTable = () => supabase.from('notes');
+export const noticesTable = () => supabase.from('notices');
 
 export const toNote = row => ({ id: row.id, title: row.title, body: row.content });
 
-export function dbFailure(response, error) {
+// Instructors come only from the server-side INSTRUCTOR_USER_IDS list in Vercel settings. A token's role claim,
+// the request body, headers, query, and the screen menu never make someone an instructor. Judge logins never are.
+export function isInstructor(login) {
+  if (login?.kind !== 'student') return false;
+  const ids = (process.env.INSTRUCTOR_USER_IDS ?? '').split(',')
+    .map(value => value.trim().toLowerCase()).filter(value => UUID.test(value));
+  return ids.includes(login.userId.toLowerCase());
+}
+
+export function dbFailure(response, error, code = 'NOTES_UNAVAILABLE') {
   // Log only the error code; messages and request details stay out of logs.
-  console.error('notes query failed', error.code ?? 'unknown');
-  return sendError(response, 502, 'NOTES_UNAVAILABLE');
+  console.error('data query failed', error.code ?? 'unknown');
+  return sendError(response, 502, code);
+}
+
+// Instructor materials are closed to every login on this server; there is no materials data behind it.
+export async function closedMaterials(request, response, apiPath) {
+  markResource(request, response, apiPath);
+  if (!await requireLogin(request, response)) return;
+  return sendError(response, 403, 'MATERIALS_ZONE_FORBIDDEN');
 }
 
 // True when the body names an owner other than the verified user. The owner is never taken from the body.

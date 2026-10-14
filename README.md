@@ -85,7 +85,7 @@ npm run bundle
 
 ## 7단계: 평소와 다른 접속은 다시 확인합니다
 
-- 판정기는 계약의 `signals`·`recentEvents`·`stepUp`만 읽습니다. 계약 18개 이름 밖의 값(브라우저 헤더, `role`, `identity`, `device` 등)이 붙거나 형식이 틀린 요청은 `starter.deny`로 거부합니다. `signals.source`가 `none`이면 지역·네트워크·시각을 모르는 값(`null`)으로 두고, `judge_fixture`가 아닌 다른 출처의 값은 버립니다. 모르는 값은 정상값으로 채우지 않습니다.
+- 판정기는 계약의 `signals`·`recentEvents`·`stepUp`만 읽습니다. 계약 18개 이름 밖의 값(브라우저 헤더, `role`, `identity`, `device` 등)이 붙거나 형식이 틀린 요청은 `starter.deny`로 거부합니다. `signals.source`가 `none`이면 지역·네트워크·시각을 모르는 값(`null`)으로 두고, `judge_fixture`가 아닌 다른 출처의 값은 버립니다. 모르는 값은 정상값으로 채우지 않습니다. `recentEvents`의 사건 이름(`kind`)은 비어 있지 않은 64자 이하 문자열이면 받습니다.
 - 이상 징후는 새벽 0~5시(`anomaly.off_hours`), `usual`이 아닌 네트워크(`anomaly.new_network`), `local`이 아닌 지역(`anomaly.region_change`), 최근 10분 사건 합계 10건 이상(`anomaly.activity_burst`)입니다. 두 가지 이상 겹치면 `step_up`·`step_up_required`로 추가 확인을 요구하고, 걸린 징후 이름을 `ruleIds`에 사유로 남깁니다. 지역 급변 하나로는 막지 않으며, 이 규칙은 영구 차단(`deny`)을 하지 않습니다.
 - 6단계 `device_registered` 규칙이 먼저 적용됩니다. 미등록이면 이상 징후와 관계없이 `device_not_registered`입니다.
 
@@ -102,6 +102,25 @@ npm run bundle
 3. `npm run fixture:7`을 실행합니다. `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
 
 2026-10-14 로컬 실행에서 두 명령 모두 통과했습니다. 가상 요청 연습이며 심판 판정이나 실제 접속 차단 증거가 아닙니다. 같은 날 저장소를 새로 받아 `npm install`을 실행했을 때 의존성(`@supabase/supabase-js@2.117.2`, `jose@6.2.12`) 설치 오류가 없었습니다. `npm run bundle`의 `src/attack-check.mjs`는 7단계에서 6단계까지의 실제 요청 점검을 그대로 보내고, 복합 이상 접속의 실제 차단(`anomalous_access_step_up`)은 미실행으로 기록합니다.
+
+## 8단계: 자료마다 갈 수 있는 구역을 나눕니다
+
+- **자원 ID:** `src/decider.mjs`의 `RESOURCES` 한 곳에 정합니다. 내 메모 `notes.own`(personal), 반 공지 `notices.class`(class), 강사 자료 `materials.instructor`(instructor), 공지 관리 `notices.admin`(admin), 로그인 설정 `app.auth_config`(public)입니다. 판정기는 엔진 요청의 `service`·`route`로, 서버는 같은 경로의 `/api` 주소로 같은 ID를 찾고, 서버 응답에는 `X-Aleph-Resource: notes.own; zone=personal` 같은 헤더가 붙습니다.
+- **판정기 구역 규칙:** 메모는 `GET /notes/:id`만 허용하고 ID 없는 `/notes`는 `note_id_required`로 거부합니다(`zone.notes_single_item`). 반 공지는 `GET /notices`, `GET /notices/:id`만 허용하고 쓰기는 `notice_write_denied`입니다(`zone.notices_read_only`). 강사 자료는 모두 `instructor_zone_denied`(`zone.instructor_materials`), 그 밖의 서비스는 `route_not_allowed`(`zone.default_deny`)입니다. `:id` 칸은 UUID로 좁히지 않지만 한 칸짜리 이름이어야 하고 `export`·`all`·`search`·`admin` 같은 기능 이름은 받지 않습니다. 경로 모양이 칸 수까지 정확히 같아야 하고, 쿼리가 붙은 요청은 허용하지 않습니다. 6·7단계 규칙(기기 등록, 입력 검사, 복합 이상 `step_up`)은 그대로이며, 구역에서 거부되는 요청은 재로그인을 요구하지 않고 바로 거부합니다.
+- **`allowedRoutes`:** 판정기가 허용하는 `GET /api/notes/:id`, `GET /api/notices`, `GET /api/notices/:id`만 적습니다.
+- **서버 API의 다시 대조:** 사용자 ID는 검증된 로그인 토큰에서만 꺼내고, 본문·헤더·쿼리·화면의 `role`·`owner_id`는 쓰지 않습니다. 메모는 지금처럼 `owner_id = 검증된 사용자 ID`로만 다룹니다(남의 메모 `403 NOT_NOTE_OWNER`). `GET /api/notices`·`/api/notices/:id`는 로그인한 누구나 읽고, 같은 경로의 쓰기는 강사를 포함해 `403 NOTICE_READ_ONLY`입니다. 공지 수정·삭제는 별도 관리 경로 `PUT·DELETE /api/admin/notices/:id`에서만 하며, Vercel 환경변수 `INSTRUCTOR_USER_IDS`에 있는 학생 프로젝트 로그인만 강사로 봅니다(그 밖에는 `403 INSTRUCTOR_ONLY`, 비어 있으면 아무도 강사가 아님). 판정기는 이 관리 경로를 허용하지 않습니다. `/api/materials`·`/api/materials/:id`는 누구에게나 `403 MATERIALS_ZONE_FORBIDDEN`입니다. 토큰이 없으면 모두 `401 LOGIN_REQUIRED`이고 거부는 모두 `{ "error": "..." }` JSON입니다.
+- **학습 DB:** `supabase/step8-notices.sql`을 SQL Editor에서 실행해 `notices` 테이블과 시험용 가상 공지 한 건(`c8000000-0000-4000-8000-000000000001`)을 만듭니다. `anon`·`authenticated`·PUBLIC 권한은 모두 거두고 `service_role`만 씁니다. 실행하지 않으면 `GET /api/notices`가 `502 NOTICES_UNAVAILABLE`입니다.
+
+### 확인 순서
+
+1. `npm ci`로 의존성을 설치합니다.
+2. `npm run decider:test`를 실행합니다. `통과` 네 줄이 나와야 합니다. 첫 줄의 정상 요청은 자기 메모 단건 경로(`GET /notes/:id`)입니다.
+3. `npm run fixture:7`을 실행합니다. `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
+4. 배포 뒤 로그인하지 않은 브라우저에서 `/api/notices`, `/api/materials`를 열면 `401` `LOGIN_REQUIRED` JSON이어야 합니다.
+
+2026-10-14 로컬 확인 기록: 위 2·3번이 통과했습니다. 판정기에 가상 요청 29건을 넣어 메모 단건·공지 읽기만 허용되고 메모 목록·공지 쓰기·강사 자료·알 수 없는 경로·`export` 같은 예약어 경로·쿼리 붙은 요청이 거부됨을 확인했습니다. 로그인 검사와 DB를 가짜로 바꾼 로컬 시험에서 서버 API에 직접 요청 24건을 보내, 위조한 `role`·`owner_id` 헤더·본문·쿼리로도 남의 메모와 강사 자료가 나오지 않고 학생과 심판 로그인의 공지 수정이 403으로 막힘을 확인했습니다. 이 기록은 가상 요청과 로컬 시험이며 심판 판정이나 배포 확인이 아닙니다. 학습 DB SQL 실행과 `INSTRUCTOR_USER_IDS` 설정은 이 기록에서 확인되지 않았습니다.
+
+**남은 약점:** 판정기는 엔진을 거치는 요청에만 적용됩니다. 배포된 서버의 `GET /api/notes` 목록과 메모 추가·수정·삭제는 화면이 쓰므로 남아 있으며(본인 메모만), `allowedRoutes`와 판정기에서는 거부 대상입니다. `npm run bundle`의 `src/attack-check.mjs`는 8단계에서 토큰 없는 공지 수정·관리 경로·강사 자료 요청을 실제로 보내고, 학생 계정 토큰이 필요한 공지 수정 점검은 미실행으로 남깁니다. 묶음의 직접 점검 최대 20개에 맞추려고, 같은 이유로 미실행인 이전 점검(만료·다른 서비스 토큰, 타인 메모 접근·소유자 변경)은 `login_token_variants`, `other_user_note_access` 두 항목으로 합쳤습니다.
 
 ## 가상 메모 노출 확인 절차
 

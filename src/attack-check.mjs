@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6, 7].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7, 8].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -17,6 +17,7 @@ export async function runAttackChecks(config) {
   if (config.step === 5) return runStep5Checks(app, config);
   if (config.step === 6) return runStep6Checks(app, config);
   if (config.step === 7) return runStep7Checks(app, config);
+  if (config.step === 8) return runStep8Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -213,5 +214,53 @@ async function runStep7Checks(app, config) {
     ...earlier,
     { attackId: 'anomalous_access_step_up', expected: '평소와 다른 시각·새 네트워크·활동 급증이 겹친 요청은 재로그인 확인 전 step_up_required로 자료 접근이 막힘',
       observed: '미실행: 엔진이 판정으로 배포 자료 API를 막는 연결이 저장소에 없고 실제 경로 신호는 source none이라 보내지 않음(토큰 원문 기록 안 함)' },
+  ];
+}
+
+// The bundle accepts at most 20 checks. Earlier not-run checks that share one reason are merged into one entry;
+// a group is merged only while every member is still not run.
+const MERGED_NOT_RUN = [
+  { attackId: 'login_token_variants', from: ['expired_token', 'other_service_token'],
+    expected: '만료되었거나 다른 서비스용으로 발급된 로그인 토큰이 401로 거부됨' },
+  { attackId: 'other_user_note_access', from: ['other_user_note_read', 'other_user_note_update', 'other_user_note_delete', 'owner_change'],
+    expected: 'A가 B 메모를 읽기·수정·삭제하거나 본문에 B의 owner_id를 넣으면 403 JSON 오류로 거부되고 B 메모가 그대로임' },
+];
+
+function mergeNotRun(checks) {
+  let result = checks;
+  for (const group of MERGED_NOT_RUN) {
+    const members = result.filter(item => group.from.includes(item.attackId));
+    if (members.length !== group.from.length || !members.every(item => item.observed.startsWith('미실행'))) continue;
+    const at = result.indexOf(members[0]);
+    result = result.filter(item => !group.from.includes(item.attackId));
+    result.splice(at, 0, { attackId: group.attackId, expected: group.expected, observed: members[0].observed });
+  }
+  return result;
+}
+
+// Fixed id of the test notice from supabase/step8-notices.sql.
+const TEST_NOTICE = 'c8000000-0000-4000-8000-000000000001';
+
+async function runStep8Checks(app, config) {
+  const earlier = mergeNotRun(await runStep7Checks(app, config));
+  const body = { title: '비로그인 공지 수정 시도', body: '거부되어야 함' };
+  const [noticeWrite, adminWrite, materials] = await Promise.all([
+    probe(app, `/api/notices/${TEST_NOTICE}`, { method: 'PUT', body }),
+    probe(app, `/api/admin/notices/${TEST_NOTICE}`, { method: 'PUT', body }),
+    probe(app, '/api/materials'),
+  ]);
+  const describe = result => (result
+    ? `HTTP ${result.status}, JSON ${result.json ? '예' : '아니오'}, 오류 ${result.errorCode ?? '없음'}`
+    : '요청 실패');
+  return [
+    ...earlier,
+    { attackId: 'anonymous_notice_write', expected: '토큰 없는 PUT /api/notices/:id가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 PUT /api/notices/:id(시험 공지): ${describe(noticeWrite)}` },
+    { attackId: 'anonymous_admin_notice_write', expected: '토큰 없는 PUT /api/admin/notices/:id가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 PUT /api/admin/notices/:id(시험 공지): ${describe(adminWrite)}` },
+    { attackId: 'anonymous_materials_read', expected: '토큰 없는 GET /api/materials가 401 또는 403 JSON 오류로 거부됨',
+      observed: `토큰 없는 GET /api/materials: ${describe(materials)}` },
+    { attackId: 'student_notice_write', expected: '학생 계정 토큰으로 공지를 PUT하거나 관리 경로를 부르면 403 JSON 오류로 거부되고 공지가 그대로임',
+      observed: '미실행: 학생 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
   ];
 }

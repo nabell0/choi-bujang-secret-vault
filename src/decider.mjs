@@ -4,6 +4,7 @@
 export const RULE_IDS = Object.freeze([
   'starter.deny', 'device_registered', 'step_up_required',
   'anomaly.off_hours', 'anomaly.new_network', 'anomaly.region_change', 'anomaly.activity_burst',
+  'zone.notes_single_item', 'zone.notices_read_only', 'zone.instructor_materials', 'zone.default_deny',
 ]);
 
 // docs/DECIDER_REQUEST.md의 18개 이름. 브라우저 헤더 같은 다른 이름이 붙은 요청은 엔진 형식이 아닙니다.
@@ -17,6 +18,50 @@ const BURST_WINDOW_SECONDS = 600;
 const BURST_MIN_COUNT = 10;
 // 서로 다른 이상 징후가 이만큼 겹칠 때만 추가 확인을 요구합니다. 지역 급변 하나로는 막지 않습니다.
 const STEP_UP_MIN_ANOMALIES = 2;
+
+// 자원 ID 체계. 판정기는 엔진 요청의 service·route로, 서버는 같은 경로의 /api 주소로 같은 ID를 찾습니다.
+// 반 공지·강사 자료는 구역만 정했고 아직 API·데이터가 없습니다. 강사 역할은 계약에 없어 판정 근거로 쓰지 않습니다.
+const resource = (zone, service, routes) => Object.freeze({ zone, service, routes: Object.freeze(routes) });
+const collectionRoutes = name => [`GET /${name}`, `POST /${name}`, `GET /${name}/:id`, `PUT /${name}/:id`,
+  `PATCH /${name}/:id`, `DELETE /${name}/:id`];
+export const RESOURCES = Object.freeze({
+  'notes.own': resource('personal', 'notes',
+    ['GET /notes', 'POST /notes', 'GET /notes/:id', 'PUT /notes/:id', 'DELETE /notes/:id']),
+  'notices.class': resource('class', 'notices', collectionRoutes('notices')),
+  'materials.instructor': resource('instructor', 'materials', collectionRoutes('materials')),
+  'notices.admin': resource('admin', 'notices_admin', ['PUT /admin/notices/:id', 'DELETE /admin/notices/:id']),
+  'app.auth_config': resource('public', 'auth', ['GET /auth-config']),
+});
+
+// 구역 규칙: 판정기가 허용하는 정확한 경로 모양입니다. 여기에 없는 경로는 모두 거부합니다.
+// 메모 주인 비교는 자료 API(api/notes/[id].js)가 합니다. 반 공지 수정은 역할이 계약에 없어 판정기로 열지 않고,
+// 서버가 강사 신원을 직접 확인하는 별도 관리 경로에서만 다룹니다.
+const ZONES = Object.freeze({
+  notes: Object.freeze({ ruleId: 'zone.notes_single_item', routes: Object.freeze(['GET /notes/:id']) }),
+  notices: Object.freeze({ ruleId: 'zone.notices_read_only', routes: Object.freeze(['GET /notices', 'GET /notices/:id']) }),
+});
+// ':id' 자리에 올 수 없는 기능 이름. 자료 ID 형식은 UUID 등으로 좁히지 않습니다.
+const RESERVED_ITEM_NAMES = new Set(['export', 'import', 'all', 'list', 'search', 'bulk', 'batch', 'admin',
+  'download', 'backup', 'dump', 'sync', 'archive', 'count', 'new', 'edit', 'me']);
+const API_PREFIX = '/api';
+
+const findResource = match => {
+  const found = Object.entries(RESOURCES).find(([, item]) => match(item));
+  return found ? { id: found[0], zone: found[1].zone } : null;
+};
+
+// 엔진 요청의 service·route('GET /notes/:id' 모양)로 자원을 찾습니다. 목록에 없으면 null입니다.
+export function resourceForRoute(service, route) {
+  if (typeof service !== 'string' || typeof route !== 'string') return null;
+  return findResource(item => item.service === service && item.routes.includes(route));
+}
+
+// 서버 함수의 메서드와 /api 경로 모양('/api/notes/:id')으로 같은 자원을 찾습니다.
+export function resourceForApiRoute(method, apiPath) {
+  if (typeof method !== 'string' || typeof apiPath !== 'string' || !apiPath.startsWith(`${API_PREFIX}/`)) return null;
+  const route = `${method.toUpperCase()} ${apiPath.slice(API_PREFIX.length)}`;
+  return findResource(item => item.routes.includes(route));
+}
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasExactKeys = (value, keys) => isRecord(value)
@@ -63,13 +108,18 @@ function readSignals(signals) {
 export function readDecisionInput(request) {
   if (!hasExactKeys(request, REQUEST_KEYS) || request.schema !== 'aleph.decision.v1'
       || typeof request.requestId !== 'string' || !request.requestId
-      || typeof request.method !== 'string' || typeof request.deviceRegistered !== 'boolean') return null;
+      || typeof request.method !== 'string' || typeof request.deviceRegistered !== 'boolean'
+      || typeof request.service !== 'string' || typeof request.route !== 'string'
+      || typeof request.path !== 'string' || !Number.isInteger(request.queryLength)
+      || request.queryLength < 0) return null;
   const stepUp = readStepUp(request.stepUp);
   const recentEvents = readRecentEvents(request.recentEvents);
   const signals = readSignals(request.signals);
   if (!stepUp || !recentEvents || !signals) return null;
   return {
-    requestId: request.requestId, method: request.method,
+    requestId: request.requestId, method: request.method, service: request.service,
+    route: request.route, path: request.path, queryLength: request.queryLength,
+    resource: resourceForRoute(request.service, request.route),
     deviceRegistered: request.deviceRegistered, stepUp, recentEvents, signals,
   };
 }
@@ -86,6 +136,34 @@ function anomalyRuleIds({ signals, recentEvents }) {
   return found;
 }
 
+function isItemSegment(segment) {
+  let name;
+  try { name = decodeURIComponent(segment); } catch { return false; }
+  return name.length > 0 && name.length <= 128 && name !== '.' && name !== '..'
+    && !/[\s/\\?#]/u.test(name) && !RESERVED_ITEM_NAMES.has(name.toLowerCase());
+}
+
+// 실제 path가 route의 경로 모양과 칸 수·글자까지 같아야 합니다. ':id' 칸은 자료 하나의 이름이어야 합니다.
+function pathFitsRoute(path, route) {
+  const shape = route.slice(route.indexOf(' ') + 1).split('/');
+  const parts = path.split('/');
+  return parts.length === shape.length
+    && shape.every((piece, i) => (piece === ':id' ? isItemSegment(parts[i]) : piece === parts[i]));
+}
+
+// 기능은 경로로만 고릅니다. 쿼리가 붙은 요청은 어떤 구역에서도 허용하지 않습니다.
+function zoneVerdict({ method, service, route, path, queryLength }) {
+  const deny = (ruleId, reasonCode) => ({ allowed: false, ruleId, reasonCode });
+  if (service === 'materials') return deny('zone.instructor_materials', 'instructor_zone_denied');
+  if (service === 'notices' && method !== 'GET') return deny('zone.notices_read_only', 'notice_write_denied');
+  const zone = Object.hasOwn(ZONES, service) ? ZONES[service] : null;
+  if (!zone) return deny('zone.default_deny', 'route_not_allowed');
+  if (service === 'notes' && path.split('/').length === 2) return deny(zone.ruleId, 'note_id_required');
+  if (!zone.routes.includes(route) || !route.startsWith(`${method} `) || queryLength !== 0
+      || !pathFitsRoute(path, route)) return deny(zone.ruleId, 'route_not_allowed');
+  return { allowed: true, ruleId: zone.ruleId };
+}
+
 const respond = (request, decision, reasonCode, ruleIds) => ({
   schema: 'aleph.decision.v1',
   requestId: request?.requestId,
@@ -100,14 +178,13 @@ export async function decide(request) {
   }
   const input = readDecisionInput(request);
   if (!input) return respond(request, 'deny', 'starter_not_ready', ['starter.deny']);
+  const zone = zoneVerdict(input);
+  if (!zone.allowed) return respond(request, 'deny', zone.reasonCode, [zone.ruleId]);
   const anomalies = anomalyRuleIds(input);
   const needsStepUp = anomalies.length >= STEP_UP_MIN_ANOMALIES;
   if (needsStepUp && !input.stepUp.verified) {
     return respond(request, 'step_up', 'step_up_required', ['step_up_required', ...anomalies]);
   }
-  if (input.method === 'GET') {
-    const verified = needsStepUp ? ['step_up_required', ...anomalies] : [];
-    return respond(request, 'allow', 'approved', ['device_registered', ...verified]);
-  }
-  return respond(request, 'deny', 'starter_not_ready', ['starter.deny']);
+  const verified = needsStepUp ? ['step_up_required', ...anomalies] : [];
+  return respond(request, 'allow', 'approved', ['device_registered', zone.ruleId, ...verified]);
 }

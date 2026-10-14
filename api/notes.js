@@ -1,9 +1,12 @@
 // GET /api/notes: the verified user's notes. POST /api/notes: add a note owned by the verified user.
 import { randomUUID } from 'node:crypto';
-import { dbFailure, notesTable, readNoteInput, refuseOwnerChange, requestsOtherOwner, requireLogin, sendError, toNote }
-  from '../src/notes-server.mjs';
+import {
+  dbFailure, markResource, notesTable, readNoteInput, refuseOwnerChange, requestsOtherOwner, requireLogin, sendError,
+  toNote,
+} from '../src/notes-server.mjs';
 
 export default async function handler(request, response) {
+  markResource(request, response, '/api/notes');
   const login = await requireLogin(request, response);
   if (!login) return;
 
