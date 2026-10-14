@@ -141,6 +141,70 @@ npm run bundle
 
 **남은 약점:** 판정기와 탐지 함수의 회수 제안은 반환값일 뿐이고, 운영 반 엔진이 사건을 전달하고 제안을 받아 집행하는 연결은 이 저장소에 없습니다. 실제 경로의 `signals`는 `source: "none"`이라 실제 접속에서는 판정기의 의심 표시가 생기지 않습니다. `npm run bundle`의 `src/attack-check.mjs`는 9단계에서 8단계까지의 실제 요청 점검을 그대로 보내고, 도플갱어 기기 회수(`doppelganger_device_revocation`)는 미실행으로 기록합니다. 직접 점검 최대 20개에 맞추려고, 같은 이유(실제 계정 토큰 필요)로 미실행인 타인 메모 접근과 원본 API 토큰 직접 호출 점검은 `account_token_access` 한 항목으로 합쳤습니다.
 
+## 10단계: 백업에서 자료실을 되살립니다
+
+### 메모 한 건 복구 서비스
+
+- **복구 서비스와 경로:** `POST /api/restore/notes/:id` (`api/restore/notes/[id].js`). `aleph.config.json`의 `restoreRoute`에 같은 값을 적었고, `npm run bundle`이 이 값을 제출 묶음의 `restoreRoute`로 싣습니다. 본문은 필요 없고 읽지도 않습니다.
+- **비공개 사본:** Supabase의 `public.notes_backup`에 메모 ID·소유자·제목·내용·내용 해시를 둡니다. 공개 키·로그인 토큰의 직접 권한은 없고, 서버 함수(`service_role`)는 사본을 읽기만 합니다. 메모 본문은 DB에만 있고 Git·제출 묶음에 들어가지 않습니다.
+- **복원 전 검증:** 검증된 로그인 ID가 사본의 `owner_id`와 같아야 하고(아니면 `403 NOT_NOTE_OWNER`), 사본의 ID가 경로의 ID와 같고, 사본의 제목·내용으로 다시 계산한 해시가 저장된 `content_sha256`과 같아야 합니다(아니면 `409 BACKUP_VERIFY_FAILED`). 사본이 없으면 `404 BACKUP_NOT_FOUND`, 토큰이 없으면 `401`, `POST`가 아니면 `405`입니다. 요청의 `owner_id`·`role`은 쓰지 않습니다.
+- **복원:** 그 ID 한 건만 사본 값으로 덮어쓰거나(변조) 다시 만들고(삭제), 저장된 행의 ID·소유자·내용 해시가 사본과 같은지 다시 확인한 뒤 `200 { id, restored: true, contentSha256 }`을 돌려줍니다. 다른 메모와 사본은 바꾸지 않습니다.
+- **감사 기록:** 시도마다 `public.note_restore_audit`에 메모 ID·요청자 ID·결과·해시 한 줄을 덧붙입니다(제목·내용 없음). 서버 함수는 이 테이블에 추가·조회만 할 수 있고 고치거나 지울 권한이 없습니다.
+- 내용 해시 = SHA-256(`<제목의 UTF-8 바이트 수>:<제목><내용>`)입니다. SQL과 `src/notes-server.mjs`의 `noteContentSha256`이 같은 식을 씁니다.
+
+**준비 (침해 전에 한 번):** `supabase/step10-note-backup.sql`을 SQL Editor에서 실행합니다. 실행하는 순간의 메모를 사본으로 뜨므로 B 시험 메모(`b4000000-0000-4000-8000-000000000001`)가 정상일 때 실행해야 합니다. 마지막 확인에서 `b_test_backed_up = true`, `b_test_matches_now = true`여야 합니다. 다시 실행해도 이미 뜬 사본은 덮어쓰지 않습니다.
+
+**심판 시험 흐름:** B 시험 메모가 변조·삭제된 뒤, B 계정으로 로그인한 토큰을 `Authorization: Bearer`에 넣어 `POST /api/restore/notes/b4000000-0000-4000-8000-000000000001`을 부르면 `200`이고 메모의 ID·소유자·내용 해시가 사본과 같아집니다. A 토큰으로 같은 경로를 부르면 `403`이고 아무것도 바뀌지 않습니다.
+
+### 정책 사본 비교와 되돌리기
+
+- `npm run policy:diff`: `policy/safe-policy.json`(커밋 `aae1ff8`에서 뜬 판정기 규칙·자원 구역·허용 경로·정책 파일 해시)을 검증한 뒤 현재 시험 정책과의 차이만 보여 줍니다. 사본이 없거나 형식·해시·커밋 내용 대조에 실패하면 즉시 중단합니다.
+- `npm run policy:restore`: 같은 검증 뒤 복원할 버전과 바뀔 항목·파일을 미리 보여 주고 아무것도 바꾸지 않습니다. `npm run policy:restore -- --apply <정책 해시 앞 12자리>`로 실행해야 `src/decider.mjs`·`src/detect.mjs`와 `aleph.config.json`의 `allowedRoutes`만 사본 내용으로 되돌립니다. API·다른 설정·Git 이력은 그대로이고, 복원 전 파일은 `artifacts/policy-restore/`(Git 제외)에, 감사 기록은 `policy/restore-log.jsonl`에 한 줄씩 덧붙습니다.
+
+### 확인 순서
+
+1. `npm ci`로 의존성을 설치합니다.
+2. `npm run restore:check`를 실행합니다. `통과` 아홉 줄이 나와야 합니다. 첫 두 줄은 B 메모를 변조·삭제한 뒤 B가 복원하면 ID·소유자·내용 해시가 사본과 같고 다른 메모가 그대로라는 뜻입니다.
+3. `npm run owner:check`를 실행합니다. `통과` 아홉 줄이 나와야 하고, B의 A 메모 읽기·수정·삭제는 403, A의 정상 요청은 200입니다.
+4. `npm run policy:diff`와 `npm run policy:restore`를 실행합니다. 지금은 `차이 없음`, `바뀔 항목: 없음`이 나와야 합니다.
+5. `npm run decider:test`, `npm run detect:test`가 각각 `통과` 여섯 줄이어야 합니다.
+
+2026-10-14 로컬 확인 기록: 위 2~5번이 통과했습니다. 2·3번은 로그인 검사와 DB를 가짜로 바꾼 시험으로, 사본이 변조되면 409로 멈추고, A가 B 메모를 복원하려 하면 403이며, 감사 기록은 덧붙기만 함을 확인했습니다. 정책 되돌리기는 임시 복제본에서 판정기·탐지 함수·허용 경로를 일부러 바꾼 뒤 적용해, 복원 뒤 위 시험이 모두 통과하고 다른 설정이 그대로임을 확인했습니다. 가상 요청·로컬 시험이며 배포 확인이나 심판 판정이 아닙니다. `supabase/step10-note-backup.sql`은 학생이 Supabase SQL Editor에서 실행했다고 알려 왔습니다(결과 화면의 `b_test_backed_up`·`b_test_matches_now` 값은 이 기록에서 직접 보지 않았습니다). 배포된 복구 경로를 실제 B 계정으로 부른 기록은 아직 없습니다.
+
+### 복구 뒤 1~9단계 다시 확인 순서
+
+정책을 되돌리거나 메모를 복구한 직후, 아래 순서로 이전 단계의 정상 요청이 그대로 되고 금지 요청이 다시 거부되는지 봅니다.
+
+1. **정책이 돌아왔는지:** `npm run policy:diff` → `변경 범위: 차이 없음`. 차이가 나오면 `npm run policy:restore`로 미리 보고 `-- --apply <해시 12자리>`로 되돌린 뒤 다시 실행합니다.
+2. **판정기(6~9단계):** `npm run decider:test`(통과 6줄), `npm run fixture:7`(`allow`, `step_up`), `npm run detect:test`(통과 6줄).
+3. **서버 API(3·4·10단계):** `npm run owner:check`(통과 9줄), `npm run restore:check`(통과 9줄).
+4. **배포 파일(1·2·5단계):** 아래 「가상 메모 노출 확인 절차」 2번 명령 → `/`·`/index.html`·`/aleph.json`은 `200 memo=False`, `/data.json`은 `404`. 같은 응답에 `X-Content-Type-Options: nosniff`가 있어야 합니다.
+5. **배포 API(3~5·8·10단계):** 커밋·배포 뒤 `npm run bundle` → `artifacts/submission.json`의 `attackAttempts`에서 토큰 없는 요청은 401 JSON, 원본 API 직접 요청은 401 `42501`, 정적 파일의 키 형태 문자열·시드 표식은 0개여야 합니다. 직접 보내지 못한 점검은 `미실행`으로 남습니다.
+
+| 단계 | 정상 요청 (유지) | 금지 요청 (다시 거부) | 2026-10-14 결과 |
+| --- | --- | --- | --- |
+| 1 | 첫 화면 `/` 200 | `/data.json`·정적 파일의 메모 | 배포(`aae1ff8`)에 실제 요청: `/data.json` 404, 정적 파일 3개 메모 없음 |
+| 2 | 모든 응답 `nosniff` | — | 배포 응답 3개에 `nosniff`, `vercel.json`의 `/(.*)` 헤더 그대로 |
+| 3 | A 로그인 후 메모 목록 | 토큰 없는 GET·POST `/api/notes`, 위조 서명 토큰 | 배포에 실제 요청: 401 `LOGIN_REQUIRED`·`INVALID_LOGIN_TOKEN`. 만료·다른 서비스 토큰은 **미실행**. A 로그인 정상 요청은 배포에서 **미실행** |
+| 4 | A의 자기 메모 읽기·수정 | 토큰 없는 `/api/notes/:id`, B의 A 메모 읽기·수정·삭제, 본문 `owner_id` | 배포에 실제 요청: 토큰 없는 GET·PUT·DELETE 401. 타인 메모 거부와 A 정상 요청은 로컬 가짜 DB(`owner:check`)에서만 확인, 실제 A·B 계정은 **미실행** |
+| 5 | 서버 함수로만 메모 처리 | 공개 키로 원본 API 직접 GET·PATCH, 정적 파일의 키 | 배포에 실제 요청: 원본 API 401 `42501`, 정적 파일 키 형태 0개. 시험 계정 토큰으로 원본 API 호출은 **미실행** |
+| 6 | 등록 기기의 메모 단건 `allow` | 미등록 기기 `device_not_registered` | 가상 요청(`decider:test`)만 통과. 배포 미등록 기기 접속은 **미실행**(심판 담당) |
+| 7 | 정상 사건 `allow` | 복합 이상 사건 `step_up` | 가상 요청(`decider:test`, `fixture:7`)만 통과. 배포 경로 차단은 **미실행** |
+| 8 | 메모 단건·공지 읽기 `allow` | 메모 목록·공지 쓰기·강사 자료·`export`·쿼리 붙은 요청 | 가상 요청 20건 형식 검사 통과. 배포에 실제 요청: 토큰 없는 공지 수정·관리 경로·강사 자료 401. 학생 토큰 공지 수정은 **미실행** |
+| 9 | 정상 사건 `observe` | 의심 사건 `burst_read` 회수 제안 | 가상 요청(`decider:test`, `detect:test`)만 통과. 실제 회수는 **미실행**(심판 담당) |
+| 10 | B가 자기 메모 복원 200 | 토큰 없는 복원, A의 B 메모 복원 | 로컬 가짜 DB(`restore:check`)만 통과. 배포에 실제 보낸 토큰 없는 복원은 **404**(복구 경로가 아직 배포 안 됨). 실제 B 계정 복원은 **미실행** |
+
+2026-10-14 점검 기록(이 변경은 아직 커밋·배포 전):
+- `aleph.config.json`의 `step`은 10입니다. 가짜 Vercel 값으로 빌드 식별 함수를 돌려 `/aleph.json`에 `step: 10`, 기존 `allowedRoutes` 세 개, `originalApiUrl`이 그대로 실리는 것을 확인했습니다. 배포된 `/aleph.json`은 아직 `step: 9`(`aae1ff8`)입니다.
+- 판정기는 계약의 요청 이름만 읽습니다. `role`·`identity`·`device`를 붙인 요청과 빈 요청을 포함한 가상 요청 20건 모두 응답이 다섯 항목 형식이었고, `ruleIds`는 모두 `RULE_IDS` 안에 있었습니다. `allowedRoutes` 세 경로는 판정기에서 `allow`, 복구 경로는 `zone.default_deny`였습니다.
+- `public/`에는 `index.html`만 있고 `data.json`이 없으며, Supabase 키 형태 문자열과 시드 표식은 0개입니다.
+- 저장소를 새로 받아 `npm install`을 실행했을 때 오류와 취약점 경고가 없었고 `package-lock.json`이 바뀌지 않았습니다.
+- 가상 요청과 로컬 시험은 심판 판정이 아니고, 배포 요청은 이 변경 전 배포본에 보낸 결과입니다.
+
+**공격 점검:** `npm run bundle`의 `src/attack-check.mjs`는 10단계에서 9단계까지의 실제 요청 점검에 토큰 없는 `POST /api/restore/notes/:id`(B 시험 메모, `anonymous_note_restore`)를 더 보냅니다. 직접 점검 최대 20개에 맞추려고, 같은 이유(실제 계정 토큰 필요)로 미실행인 계정 토큰 점검과 학생 공지 수정 점검을 `account_token_access` 한 항목으로 합쳤습니다.
+
+**남은 약점:** 복구 경로는 판정기의 허용 경로(`allowedRoutes`)에 넣지 않았고 판정기 규칙도 바꾸지 않았습니다. 엔진을 거치는 요청이라면 판정기의 `zone.default_deny`로 거부됩니다. 사본은 SQL을 실행한 시점의 메모만 담으므로, 그 뒤에 만든 메모나 사본 전에 이미 변조된 메모는 되살릴 수 없습니다. 서버 함수는 이제 11개로 Vercel Hobby 한도(12개)에 가깝습니다.
+
 ## 가상 메모 노출 확인 절차
 
 검색어는 메모 본문·제목 일부입니다. `[가]`처럼 한 글자를 괄호로 감싼 정규식을 써서 이 README 자체는 검색에 걸리지 않게 합니다. Windows의 Git 기본 정규식은 이런 한글 괄호식을 놓치므로 `git grep`에는 반드시 `-P`를 붙이세요. 화면 확인 때는 `supabase/*.local.sql`의 `content` 값을 그대로 검색하세요.

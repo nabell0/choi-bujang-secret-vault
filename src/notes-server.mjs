@@ -1,5 +1,6 @@
 // Shared by the notes API routes. Login is checked only by the template helper in verify-login.mjs;
 // identity comes from the verified token alone and request userId/role/owner_id values are never read.
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { resourceForApiRoute } from './decider.mjs';
@@ -59,6 +60,14 @@ export async function requireLogin(request, response) {
 
 export const notesTable = () => supabase.from('notes');
 export const noticesTable = () => supabase.from('notices');
+export const noteBackupTable = () => supabase.from('notes_backup');
+export const restoreAuditTable = () => supabase.from('note_restore_audit');
+
+// Same formula as supabase/step10-note-backup.sql: SHA-256 of "<title UTF-8 byte length>:<title><content>".
+export function noteContentSha256(title, content) {
+  return createHash('sha256')
+    .update(`${Buffer.byteLength(title, 'utf8')}:${title}${content}`, 'utf8').digest('hex');
+}
 
 export const toNote = row => ({ id: row.id, title: row.title, body: row.content });
 

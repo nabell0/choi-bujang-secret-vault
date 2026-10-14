@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6, 7, 8, 9].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -19,6 +19,7 @@ export async function runAttackChecks(config) {
   if (config.step === 7) return runStep7Checks(app, config);
   if (config.step === 8) return runStep8Checks(app, config);
   if (config.step === 9) return runStep9Checks(app, config);
+  if (config.step === 10) return runStep10Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -280,5 +281,24 @@ async function runStep9Checks(app, config) {
     ...earlier,
     { attackId: 'doppelganger_device_revocation', expected: '평소와 다른 네트워크와 갑작스러운 다량 조회가 겹친 기기 하나에 burst_read 이유의 회수 제안이 나오고, 회수 뒤 그 기기의 자료 접근이 막힘',
       observed: '미실행: 판정기의 회수 제안을 엔진이 집행하는 연결이 저장소에 없고, 실제 회수와 시간 측정은 심판이 맡아 요청을 보내지 않음' },
+  ];
+}
+
+// Step 10 adds one check, so the not-run checks that need real account tokens become one entry.
+const STEP10_MERGED_NOT_RUN = [
+  { attackId: 'account_token_access', from: ['account_token_access', 'student_notice_write'],
+    expected: 'A·B·학생·시험 계정 토큰으로 남의 메모를 다루거나 복원하고, 공지를 고치고, 원본 자료 API를 직접 부르면 403 또는 권한 오류로 거부되고, B가 변조·삭제된 자기 메모를 복원하면 ID·소유자·내용 해시가 사본과 같아짐',
+    observed: '미실행: A·B·학생·시험 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
+];
+
+async function runStep10Checks(app, config) {
+  const earlier = mergeNotRun(await runStep9Checks(app, config), STEP10_MERGED_NOT_RUN);
+  const restore = await probe(app, `/api/restore/notes/${B_TEST_NOTE.split('/').pop()}`, { method: 'POST' });
+  return [
+    ...earlier,
+    { attackId: 'anonymous_note_restore', expected: '토큰 없는 POST /api/restore/notes/:id가 401 JSON 오류로 거부되고 메모가 바뀌지 않음',
+      observed: restore
+        ? `토큰 없는 POST /api/restore/notes/:id(B 시험 메모): HTTP ${restore.status}, JSON ${restore.json ? '예' : '아니오'}, 오류 ${restore.errorCode ?? '없음'}`
+        : '토큰 없는 POST /api/restore/notes/:id(B 시험 메모): 요청 실패' },
   ];
 }
