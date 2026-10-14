@@ -30,6 +30,9 @@ function fakeQuery(table) {
   const state = { op: 'select', filters: [], value: null };
   const rows = () => db[table].filter(row => state.filters.every(([key, value]) => String(row[key]) === String(value)));
   const run = () => {
+    if (state.op === 'insert' && db.failAuditInsert && table === 'note_restore_audit') {
+      return { data: null, error: { code: 'fake_audit_failure' } };
+    }
     if (state.op === 'insert') { db[table].push({ ...state.value }); return { data: [{ ...state.value }], error: null }; }
     if (state.op === 'upsert') {
       const at = db[table].findIndex(row => row.id === state.value.id);
@@ -91,14 +94,37 @@ const checks = [
     const auditBefore = db.note_restore_audit.length;
     const r = await call({ login: B });
     return r.statusCode === 200 && r.body?.contentSha256 === copyOfB.content_sha256 && matchesCopy(noteB())
-      && isDeepStrictEqual(others(), before) && db.note_restore_audit.length === auditBefore + 1
+      && isDeepStrictEqual(others(), before) && db.note_restore_audit.length === auditBefore + 2
       && db.note_restore_audit.at(-1).result === 'restored';
   }],
-  ['B 메모를 삭제한 뒤 B가 복원: 같은 ID로 다시 생김, 다른 메모 그대로', async () => {
+  ['변조 후 복원: 덮어쓰기 전에 변조 상태의 해시가 감사 기록에 먼저 남음', async () => {
+    tamperB();
+    const tamperedSha256 = hash('변조된 제목', '변조된 내용');
+    const auditBefore = db.note_restore_audit.length;
+    const r = await call({ login: B });
+    const added = db.note_restore_audit.slice(auditBefore);
+    return r.statusCode === 200 && added.length === 2
+      && added[0].result === 'tampered_before_restore' && added[0].content_sha256 === tamperedSha256
+      && added[1].result === 'restored' && added[1].content_sha256 === copyOfB.content_sha256
+      && r.body?.audit?.previousState === 'tampered' && r.body.audit.previousSha256 === tamperedSha256;
+  }],
+  ['B 메모를 삭제한 뒤 B가 복원: 같은 ID로 다시 생김, 다른 메모 그대로, 삭제 상태도 감사 기록에 남음', async () => {
     deleteB();
     const before = others();
+    const auditBefore = db.note_restore_audit.length;
     const r = await call({ login: B });
-    return r.statusCode === 200 && matchesCopy(noteB()) && isDeepStrictEqual(others(), before);
+    const added = db.note_restore_audit.slice(auditBefore);
+    return r.statusCode === 200 && matchesCopy(noteB()) && isDeepStrictEqual(others(), before)
+      && added.map(row => row.result).join(',') === 'missing_before_restore,restored'
+      && r.body?.audit?.previousState === 'missing';
+  }],
+  ['감사 기록을 남기지 못하면 502이고 변조된 메모를 덮어쓰지 않음', async () => {
+    tamperB();
+    const snapshot = db.notes.map(row => ({ ...row }));
+    db.failAuditInsert = true;
+    const r = await call({ login: B });
+    db.failAuditInsert = false;
+    return r.statusCode === 502 && r.body?.error === 'RESTORE_AUDIT_FAILED' && isDeepStrictEqual(db.notes, snapshot);
   }],
   ['A가 B 메모 복원 시도: 403 NOT_NOTE_OWNER, 메모 바뀌지 않음', async () => {
     tamperB();
@@ -129,7 +155,7 @@ const checks = [
   ['감사 기록은 덧붙기만 하고 앞의 기록은 그대로', async () => {
     const earlier = db.note_restore_audit.map(row => ({ ...row }));
     await call({ login: B });
-    return db.note_restore_audit.length === earlier.length + 1
+    return db.note_restore_audit.length === earlier.length + 2
       && isDeepStrictEqual(db.note_restore_audit.slice(0, earlier.length), earlier)
       && db.note_restore_audit.every(row => !('title' in row) && !('content' in row));
   }],
