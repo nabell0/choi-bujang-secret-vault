@@ -150,7 +150,6 @@ npm run bundle
 - **복원 전 검증:** 검증된 로그인 ID가 사본의 `owner_id`와 같아야 하고(아니면 `403 NOT_NOTE_OWNER`), 사본의 ID가 경로의 ID와 같고, 사본의 제목·내용으로 다시 계산한 해시가 저장된 `content_sha256`과 같아야 합니다(아니면 `409 BACKUP_VERIFY_FAILED`). 사본이 없으면 `404 BACKUP_NOT_FOUND`, 토큰이 없으면 `401`, `POST`가 아니면 `405`입니다. 요청의 `owner_id`·`role`은 쓰지 않습니다.
 - **복원:** 그 ID 한 건만 사본 값으로 덮어쓰거나(변조) 다시 만들고(삭제), 저장된 행의 ID·소유자·내용 해시가 사본과 같은지 다시 확인한 뒤 `200 { id, restored: true, contentSha256 }`을 돌려줍니다. 다른 메모와 사본은 바꾸지 않습니다.
 - **감사 기록:** 시도마다 `public.note_restore_audit`에 메모 ID·요청자 ID·결과·해시 한 줄을 덧붙입니다(제목·내용 없음). 서버 함수는 이 테이블에 추가·조회만 할 수 있고 고치거나 지울 권한이 없습니다.
-- **덮어쓰기 전 상태 기록:** 복원 직전 메모 상태를 먼저 감사 기록에 남깁니다. 변조됐으면 `tampered_before_restore`와 변조된 내용의 해시, 삭제됐으면 `missing_before_restore`, 사본과 같으면 `intact_before_restore`입니다. 이 기록을 남기지 못하면 메모를 바꾸지 않고 `502 RESTORE_AUDIT_FAILED`입니다. 복원 뒤 `restored` 줄을 하나 더 남기고, 응답의 `audit`에 `previousState`·`previousSha256`·남긴 결과 두 개를 돌려줍니다.
 - 내용 해시 = SHA-256(`<제목의 UTF-8 바이트 수>:<제목><내용>`)입니다. SQL과 `src/notes-server.mjs`의 `noteContentSha256`이 같은 식을 씁니다.
 
 **준비 (침해 전에 한 번):** `supabase/step10-note-backup.sql`을 SQL Editor에서 실행합니다. 실행하는 순간의 메모를 사본으로 뜨므로 B 시험 메모(`b4000000-0000-4000-8000-000000000001`)가 정상일 때 실행해야 합니다. 마지막 확인에서 `b_test_backed_up = true`, `b_test_matches_now = true`여야 합니다. 다시 실행해도 이미 뜬 사본은 덮어쓰지 않습니다.
@@ -165,7 +164,7 @@ npm run bundle
 ### 확인 순서
 
 1. `npm ci`로 의존성을 설치합니다.
-2. `npm run restore:check`를 실행합니다. `통과` 열두 줄이 나와야 합니다. 첫 세 줄은 B 메모를 변조·삭제한 뒤 B가 복원하면 ID·소유자·내용 해시가 사본과 같고 다른 메모가 그대로이며, 덮어쓰기 전 변조·삭제 상태가 감사 기록에 먼저 남는다는 뜻입니다.
+2. `npm run restore:check`를 실행합니다. `통과` 아홉 줄이 나와야 합니다. 첫 두 줄은 B 메모를 변조·삭제한 뒤 B가 복원하면 ID·소유자·내용 해시가 사본과 같고 다른 메모가 그대로라는 뜻입니다.
 3. `npm run owner:check`를 실행합니다. `통과` 아홉 줄이 나와야 하고, B의 A 메모 읽기·수정·삭제는 403, A의 정상 요청은 200입니다.
 4. `npm run policy:diff`와 `npm run policy:restore`를 실행합니다. 지금은 `차이 없음`, `바뀔 항목: 없음`이 나와야 합니다.
 5. `npm run decider:test`, `npm run detect:test`가 각각 `통과` 여섯 줄이어야 합니다.
@@ -178,7 +177,7 @@ npm run bundle
 
 1. **정책이 돌아왔는지:** `npm run policy:diff` → `변경 범위: 차이 없음`. 차이가 나오면 `npm run policy:restore`로 미리 보고 `-- --apply <해시 12자리>`로 되돌린 뒤 다시 실행합니다.
 2. **판정기(6~9단계):** `npm run decider:test`(통과 6줄), `npm run fixture:7`(`allow`, `step_up`), `npm run detect:test`(통과 6줄).
-3. **서버 API(3·4·10단계):** `npm run owner:check`(통과 9줄), `npm run restore:check`(통과 12줄).
+3. **서버 API(3·4·10단계):** `npm run owner:check`(통과 9줄), `npm run restore:check`(통과 9줄).
 4. **배포 파일(1·2·5단계):** 아래 「가상 메모 노출 확인 절차」 2번 명령 → `/`·`/index.html`·`/aleph.json`은 `200 memo=False`, `/data.json`은 `404`. 같은 응답에 `X-Content-Type-Options: nosniff`가 있어야 합니다.
 5. **배포 API(3~5·8·10단계):** 커밋·배포 뒤 `npm run bundle` → `artifacts/submission.json`의 `attackAttempts`에서 토큰 없는 요청은 401 JSON, 원본 API 직접 요청은 401 `42501`, 정적 파일의 키 형태 문자열·시드 표식은 0개여야 합니다. 직접 보내지 못한 점검은 `미실행`으로 남습니다.
 

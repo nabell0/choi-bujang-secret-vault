@@ -42,19 +42,6 @@ export default async function handler(request, response) {
     return sendError(response, 409, 'BACKUP_VERIFY_FAILED', '사본 검증에 실패해 복원하지 않았습니다.');
   }
 
-  // The state being replaced (tampered or deleted) is audited before the write; without that record nothing changes.
-  const { data: current, error: readError } = await notesTable()
-    .select('id, owner_id, title, content').eq('id', id).limit(1);
-  if (readError) return dbFailure(response, readError, 'RESTORE_UNAVAILABLE');
-  const before = current?.[0];
-  const previousSha256 = before && typeof before.title === 'string' && typeof before.content === 'string'
-    ? noteContentSha256(before.title, before.content) : null;
-  const previousState = !before ? 'missing'
-    : previousSha256 === copy.content_sha256 && String(before.owner_id).toLowerCase() === userId ? 'intact' : 'tampered';
-  if (!await audit(`${previousState}_before_restore`, previousSha256)) {
-    return sendError(response, 502, 'RESTORE_AUDIT_FAILED', '감사 기록을 남기지 못해 복원하지 않았습니다.');
-  }
-
   const { data: rows, error: writeError } = await notesTable()
     .upsert({ id, owner_id: userId, title: copy.title, content: copy.content, updated_at: new Date().toISOString() },
       { onConflict: 'id' })
@@ -70,8 +57,5 @@ export default async function handler(request, response) {
   if (!await audit('restored', restoredSha256)) {
     return sendError(response, 502, 'RESTORE_AUDIT_FAILED', '메모는 복원했지만 감사 기록을 남기지 못했습니다.');
   }
-  return response.status(200).json({
-    id, restored: true, contentSha256: restoredSha256,
-    audit: { previousState, previousSha256, results: [`${previousState}_before_restore`, 'restored'] },
-  });
+  return response.status(200).json({ id, restored: true, contentSha256: restoredSha256 });
 }
