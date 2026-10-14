@@ -4,6 +4,7 @@
 export const RULE_IDS = Object.freeze([
   'starter.deny', 'device_registered', 'step_up_required',
   'anomaly.off_hours', 'anomaly.new_network', 'anomaly.region_change', 'anomaly.activity_burst',
+  'suspect.network_burst',
   'zone.notes_single_item', 'zone.notices_read_only', 'zone.instructor_materials', 'zone.default_deny',
 ]);
 
@@ -104,10 +105,19 @@ function readSignals(signals) {
   return { source: 'judge_fixture', region: label(signals.region), network: label(signals.network), hour };
 }
 
-// 계약 형식을 벗어난 요청은 null입니다. 결과에는 엔진이 넘긴 값만 출처와 함께 담습니다.
+// subjectId는 엔진이 만든 가명이라 형식을 좁히지 않고, 공백·제어 문자 없는 한 덩어리인지만 봅니다.
+const isPseudonym = value => typeof value === 'string' && /^[^\s\p{Cc}]{1,256}$/u.test(value);
+const DEVICE_ID = /^[0-9a-f]{16}$/u;
+
+// 계약 형식을 벗어난 요청은 null입니다. 결과에는 판정에 쓰는 공식 값만 담습니다:
+// 가명 사용자(subjectId), 기기(deviceId, deviceRegistered), 요청 종류(service·method·route·path·queryLength),
+// 판정 근거(stepUp·recentEvents·signals). classId·projectId·querySha256·at·policyRevision은 엔진이 이미
+// 확인한 값이라 이름만 확인하고 담지 않습니다. 이 결과는 로그나 응답으로 내보내지 않습니다.
 export function readDecisionInput(request) {
   if (!hasExactKeys(request, REQUEST_KEYS) || request.schema !== 'aleph.decision.v1'
       || typeof request.requestId !== 'string' || !request.requestId
+      || !isPseudonym(request.subjectId)
+      || typeof request.deviceId !== 'string' || !DEVICE_ID.test(request.deviceId)
       || typeof request.method !== 'string' || typeof request.deviceRegistered !== 'boolean'
       || typeof request.service !== 'string' || typeof request.route !== 'string'
       || typeof request.path !== 'string' || !Number.isInteger(request.queryLength)
@@ -117,7 +127,8 @@ export function readDecisionInput(request) {
   const signals = readSignals(request.signals);
   if (!stepUp || !recentEvents || !signals) return null;
   return {
-    requestId: request.requestId, method: request.method, service: request.service,
+    requestId: request.requestId, subjectId: request.subjectId, deviceId: request.deviceId,
+    method: request.method, service: request.service,
     route: request.route, path: request.path, queryLength: request.queryLength,
     resource: resourceForRoute(request.service, request.route),
     deviceRegistered: request.deviceRegistered, stepUp, recentEvents, signals,
@@ -134,6 +145,12 @@ function anomalyRuleIds({ signals, recentEvents }) {
     .reduce((sum, event) => sum + event.count, 0);
   if (recentCount >= BURST_MIN_COUNT) found.push('anomaly.activity_burst');
   return found;
+}
+
+// 평소와 다른 네트워크와 갑작스러운 다량 조회가 함께 있을 때만 의심으로 표시합니다. 지역·시각은 보지 않습니다.
+function suspectRuleIds(anomalies) {
+  return anomalies.includes('anomaly.new_network') && anomalies.includes('anomaly.activity_burst')
+    ? ['suspect.network_burst'] : [];
 }
 
 function isItemSegment(segment) {
@@ -181,10 +198,22 @@ export async function decide(request) {
   const zone = zoneVerdict(input);
   if (!zone.allowed) return respond(request, 'deny', zone.reasonCode, [zone.ruleId]);
   const anomalies = anomalyRuleIds(input);
-  const needsStepUp = anomalies.length >= STEP_UP_MIN_ANOMALIES;
+  const suspects = suspectRuleIds(anomalies);
+  const needsStepUp = suspects.length > 0 || anomalies.length >= STEP_UP_MIN_ANOMALIES;
+  const reasons = ['step_up_required', ...anomalies, ...suspects];
   if (needsStepUp && !input.stepUp.verified) {
-    return respond(request, 'step_up', 'step_up_required', ['step_up_required', ...anomalies]);
+    return respond(request, 'step_up', 'step_up_required', reasons);
   }
-  const verified = needsStepUp ? ['step_up_required', ...anomalies] : [];
+  const verified = needsStepUp ? reasons : [];
   return respond(request, 'allow', 'approved', ['device_registered', zone.ruleId, ...verified]);
+}
+
+// decide() 응답과 따로 내는 회수 제안입니다. 제안만 하며 회수 API·DB·기기 권한은 건드리지 않습니다.
+// 대상은 엔진이 확인한 등록 기기 하나(deviceId)뿐이고, 재확인을 마친 요청에는 내지 않습니다.
+export function proposeRevocation(request) {
+  const input = readDecisionInput(request);
+  if (!input || !input.deviceRegistered || input.stepUp.verified) return { action: 'observe' };
+  const suspects = suspectRuleIds(anomalyRuleIds(input));
+  if (!suspects.length) return { action: 'observe' };
+  return { action: 'propose_revocation', reasonCode: 'burst_read', deviceId: input.deviceId, ruleIds: suspects };
 }

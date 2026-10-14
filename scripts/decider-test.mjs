@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { fixtureRequests } from './fixture-7.mjs';
 
 const RESPONSE_KEYS = 'decision,reasonCode,requestId,ruleIds,schema';
@@ -18,7 +19,7 @@ function validResponse(request, response, ruleIds) {
 }
 
 // Local practice only. The class engine and the server judge validate live requests separately.
-export async function checkDecider({ decide, ruleIds }) {
+export async function checkDecider({ decide, ruleIds, proposeRevocation }) {
   if (typeof decide !== 'function' || !Array.isArray(ruleIds)
       || !ruleIds.includes('device_registered')) {
     throw new Error('6단계 device_registered 규칙을 먼저 구현하고 RULE_IDS에 적어 주세요.');
@@ -46,13 +47,24 @@ export async function checkDecider({ decide, ruleIds }) {
       && (!item.reasonCode || response.reasonCode === item.reasonCode);
     results.push({ name: item.name, passed: valid });
   }
+  if (typeof proposeRevocation === 'function') {
+    const proposal = await proposeRevocation(suspicious);
+    results.push({ name: '의심 사건의 기기 회수 제안', passed: Boolean(proposal)
+      && Object.keys(proposal).sort().join(',') === 'action,deviceId,reasonCode,ruleIds'
+      && proposal.action === 'propose_revocation' && proposal.deviceId === suspicious.deviceId
+      && /^[a-z][a-z0-9_]{0,63}$/u.test(proposal.reasonCode)
+      && Array.isArray(proposal.ruleIds) && proposal.ruleIds.length > 0
+      && proposal.ruleIds.every(id => ruleIds.includes(id)) });
+    results.push({ name: '정상 사건은 회수 제안 없음',
+      passed: isDeepStrictEqual(await proposeRevocation(normal), { action: 'observe' }) });
+  }
   return results;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { decide, RULE_IDS } = await import('../src/decider.mjs');
-    const results = await checkDecider({ decide, ruleIds: RULE_IDS });
+    const { decide, RULE_IDS, proposeRevocation } = await import('../src/decider.mjs');
+    const results = await checkDecider({ decide, ruleIds: RULE_IDS, proposeRevocation });
     for (const item of results) process.stdout.write(`${item.passed ? '통과' : '확인 필요'} · ${item.name}\n`);
     process.stdout.write('이 명령은 가상 요청으로 연습하며 심판 통과 증거가 아닙니다.\n');
     if (results.some(item => !item.passed)) process.exitCode = 1;

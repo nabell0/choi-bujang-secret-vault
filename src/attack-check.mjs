@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6, 7, 8].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7, 8, 9].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -18,6 +18,7 @@ export async function runAttackChecks(config) {
   if (config.step === 6) return runStep6Checks(app, config);
   if (config.step === 7) return runStep7Checks(app, config);
   if (config.step === 8) return runStep8Checks(app, config);
+  if (config.step === 9) return runStep9Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -226,14 +227,22 @@ const MERGED_NOT_RUN = [
     expected: 'A가 B 메모를 읽기·수정·삭제하거나 본문에 B의 owner_id를 넣으면 403 JSON 오류로 거부되고 B 메모가 그대로임' },
 ];
 
-function mergeNotRun(checks) {
+// Step 9 adds one check, so two more not-run checks that both need real account tokens are merged.
+const STEP9_MERGED_NOT_RUN = [
+  { attackId: 'account_token_access', from: ['other_user_note_access', 'original_api_test_account_token'],
+    expected: 'A·B·시험 계정 토큰으로 남의 메모를 다루거나 원본 자료 API를 직접 부르면 403 또는 권한 오류로 거부됨',
+    observed: '미실행: A·B·시험 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
+];
+
+function mergeNotRun(checks, groups = MERGED_NOT_RUN) {
   let result = checks;
-  for (const group of MERGED_NOT_RUN) {
+  for (const group of groups) {
     const members = result.filter(item => group.from.includes(item.attackId));
     if (members.length !== group.from.length || !members.every(item => item.observed.startsWith('미실행'))) continue;
     const at = result.indexOf(members[0]);
     result = result.filter(item => !group.from.includes(item.attackId));
-    result.splice(at, 0, { attackId: group.attackId, expected: group.expected, observed: members[0].observed });
+    result.splice(at, 0, { attackId: group.attackId, expected: group.expected,
+      observed: group.observed ?? members[0].observed });
   }
   return result;
 }
@@ -262,5 +271,14 @@ async function runStep8Checks(app, config) {
       observed: `토큰 없는 GET /api/materials: ${describe(materials)}` },
     { attackId: 'student_notice_write', expected: '학생 계정 토큰으로 공지를 PUT하거나 관리 경로를 부르면 403 JSON 오류로 거부되고 공지가 그대로임',
       observed: '미실행: 학생 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
+  ];
+}
+
+async function runStep9Checks(app, config) {
+  const earlier = mergeNotRun(await runStep8Checks(app, config), STEP9_MERGED_NOT_RUN);
+  return [
+    ...earlier,
+    { attackId: 'doppelganger_device_revocation', expected: '평소와 다른 네트워크와 갑작스러운 다량 조회가 겹친 기기 하나에 burst_read 이유의 회수 제안이 나오고, 회수 뒤 그 기기의 자료 접근이 막힘',
+      observed: '미실행: 판정기의 회수 제안을 엔진이 집행하는 연결이 저장소에 없고, 실제 회수와 시간 측정은 심판이 맡아 요청을 보내지 않음' },
   ];
 }
