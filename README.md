@@ -127,6 +127,7 @@ npm run bundle
 - **입력 정리:** 판정기는 계약의 가명 사용자 `subjectId`(공백·제어 문자 없는 1~256자), 기기 `deviceId`(16자리 소문자 16진수), 요청 종류(`service`·`method`·`route`·`path`·`queryLength`), 판정 근거(`deviceRegistered`·`stepUp`·`recentEvents`·`signals`)만 읽습니다. `classId`·`projectId`·`querySha256`·`at`·`policyRevision`은 이름만 확인합니다. 형식이 틀리거나 `role`·`identity`·`device` 같은 이름이 붙으면 `starter.deny`입니다. 판정기는 입력을 로그나 응답으로 내보내지 않습니다.
 - **의심 규칙 `suspect.network_burst`:** 평소와 다른 네트워크(`anomaly.new_network`)와 최근 10분 다량 조회(`anomaly.activity_burst`)가 함께 있을 때만 의심으로 표시하고 `step_up`·`step_up_required`로 재확인을 요구합니다. 지역·시각 하나만으로는 표시하지 않고, 정상 사건은 그대로 `allow`입니다. 계약과 시험 코드에 이 규칙의 ID가 정해져 있지 않아 기존 이름 방식으로 정했습니다. 6~8단계 규칙은 그대로입니다.
 - **회수 제안 `proposeRevocation(request)`:** `decide()`의 응답 다섯 항목과 판정은 바꾸지 않고, `src/decider.mjs`가 따로 내보내는 함수입니다. 등록 기기에서 온 의심 사건이고 아직 재확인 전일 때만 `{ action: 'propose_revocation', reasonCode: 'burst_read', deviceId, ruleIds: ['suspect.network_burst'] }`를 돌려줍니다. 대상은 엔진이 확인한 기기 하나뿐입니다. 그 밖에는 `{ action: 'observe' }`입니다. 이유 코드는 `docs/DETECT_EVENTS.md`의 회수 제안 코드를 따랐습니다. 회수 API, DB, 기기 권한은 건드리지 않으며, 실제 회수와 시간 측정은 심판이 확인합니다.
+- **탐지 함수 `src/detect.mjs`:** [docs/DETECT_EVENTS.md](docs/DETECT_EVENTS.md) 계약대로, 같은 `identity.sub`의 `GET` 사건이 어느 10분 구간에서든 120건을 넘을 때만 `{ action: 'propose_revocation', reasonCode: 'burst_read', subject }`를 돌려줍니다. 정확히 120건, 다른 사용자끼리 합친 경우, 10분 밖으로 흩어진 경우는 `{ action: 'observe' }`입니다. `GET`이 아니거나 시각·`sub`가 없는 사건은 세지 않습니다. 사건 내용을 기록하지 않고 회수를 집행하지도 않습니다.
 - `aleph.config.json`의 `step`은 9입니다. Vercel 빌드가 이 값을 `/aleph.json`의 `step`에 그대로 씁니다.
 
 ### 확인 순서
@@ -134,10 +135,11 @@ npm run bundle
 1. `npm ci`로 의존성을 설치합니다.
 2. `npm run decider:test`를 실행합니다. `통과` 여섯 줄이 나와야 합니다. 다섯째 줄 `의심 사건의 기기 회수 제안`은 의심 사건이 기기 하나와 이유 코드가 있는 제안을 냈다는 뜻이고, 여섯째 줄 `정상 사건은 회수 제안 없음`은 정상 사건이 `observe`라는 뜻입니다.
 3. `npm run fixture:7`을 실행합니다. `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
+4. `npm run detect:test`를 실행합니다. `통과` 여섯 줄이 나와야 합니다. `10분 안에 121건`과 `폭주 조회 200건`은 회수 제안이 나왔다는 뜻이고, 나머지 네 줄은 `observe`라는 뜻입니다.
 
-2026-10-14 로컬 확인 기록: 위 2·3번이 통과했습니다. 가상 요청 18건(정상, 의심, 신호 하나뿐인 사건, 재확인한 의심, 미등록, 출처 불명, `role` 덧붙임, 구역 밖 경로, 빈 요청 등)에서 `decide()` 응답이 모두 다섯 항목 형식이고 `ruleIds`가 `RULE_IDS` 안에 있었습니다. 회수 제안은 의심 사건 두 건에서만 나왔습니다. `package.json`·`package-lock.json`만 새 폴더에 옮겨 `npm ci`를 실행했을 때 설치 오류가 없었습니다. 가상 요청 연습이며 심판 판정이나 실제 회수 증거가 아닙니다.
+2026-10-14 로컬 확인 기록: 위 2·3·4번이 통과했습니다. 탐지 함수는 시험에 없는 경우(`POST` 121건, 시각이 깨진 사건, `sub` 없는 사건, 순서가 섞인 사건, 다른 사용자만 넘은 경우)도 따로 확인했습니다. 가상 요청 18건(정상, 의심, 신호 하나뿐인 사건, 재확인한 의심, 미등록, 출처 불명, `role` 덧붙임, 구역 밖 경로, 빈 요청 등)에서 `decide()` 응답이 모두 다섯 항목 형식이고 `ruleIds`가 `RULE_IDS` 안에 있었습니다. 회수 제안은 의심 사건 두 건에서만 나왔습니다. `package.json`·`package-lock.json`만 새 폴더에 옮겨 `npm ci`를 실행했을 때 설치 오류가 없었습니다. 가상 요청 연습이며 심판 판정이나 실제 회수 증거가 아닙니다.
 
-**남은 약점:** 회수 제안은 판정기 함수의 반환값일 뿐이고, 엔진이 이를 받아 집행하는 연결은 이 저장소에 없습니다. 실제 경로의 `signals`는 `source: "none"`이라 실제 접속에서는 의심 표시가 생기지 않습니다. `src/detect.mjs`(10분 안 120건 초과 회수 제안)는 아직 기본값(`observe`)입니다. `npm run bundle`의 `src/attack-check.mjs`는 9단계에서 8단계까지의 실제 요청 점검을 그대로 보내고, 도플갱어 기기 회수(`doppelganger_device_revocation`)는 미실행으로 기록합니다. 직접 점검 최대 20개에 맞추려고, 같은 이유(실제 계정 토큰 필요)로 미실행인 타인 메모 접근과 원본 API 토큰 직접 호출 점검은 `account_token_access` 한 항목으로 합쳤습니다.
+**남은 약점:** 판정기와 탐지 함수의 회수 제안은 반환값일 뿐이고, 운영 반 엔진이 사건을 전달하고 제안을 받아 집행하는 연결은 이 저장소에 없습니다. 실제 경로의 `signals`는 `source: "none"`이라 실제 접속에서는 판정기의 의심 표시가 생기지 않습니다. `npm run bundle`의 `src/attack-check.mjs`는 9단계에서 8단계까지의 실제 요청 점검을 그대로 보내고, 도플갱어 기기 회수(`doppelganger_device_revocation`)는 미실행으로 기록합니다. 직접 점검 최대 20개에 맞추려고, 같은 이유(실제 계정 토큰 필요)로 미실행인 타인 메모 접근과 원본 API 토큰 직접 호출 점검은 `account_token_access` 한 항목으로 합쳤습니다.
 
 ## 가상 메모 노출 확인 절차
 
