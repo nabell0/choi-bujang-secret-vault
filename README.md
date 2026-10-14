@@ -52,7 +52,7 @@
 - 화면 파일에 Supabase Project URL과 공개 키를 적지 않습니다. 화면은 `GET /api/auth-config`에서 Vercel 환경변수 `SUPABASE_URL`·`SUPABASE_PUBLISHABLE_KEY`를 런타임에 받아 로그인 SDK를 시작합니다. 이 함수는 비밀 키(`sb_secret_…`, `service_role`)가 잘못 들어 있으면 보내지 않습니다. 공개 키는 여전히 런타임에 브라우저로 전달되므로 비밀은 아니며, 정적 파일·브라우저 묶음에서 검색되지 않게 한 것입니다.
 - `supabase/step5-revoke-direct.sql`: `notes` 테이블(과 그 번호 시퀀스)에서 `PUBLIC`·`anon`·`authenticated`의 직접 권한을 모두 거둡니다. RLS와 4단계 본인 행 정책은 남겨 둡니다. 적용 전후 권한 대조표(역할 4개 × 권한 7개)가 나오며, 서버 함수가 쓰는 `service_role`은 그대로여야 합니다.
 - 원본 자료 API 주소는 `aleph.config.json`의 `originalApiUrl`(`https://kcxnmaxipzlxdxwvpupv.supabase.co/rest/v1/notes`)입니다. 위 SQL 적용 뒤에는 공개 키로 직접 불러도 `permission denied`로 거부되어야 합니다.
-- 빌드는 `aleph.config.json`의 `allowedRoutes`를 `/aleph.json`에도 기록합니다. 경로가 비었거나 `메서드 /api/경로` 형식이 아니면 빌드가 실패합니다.
+- 빌드는 `aleph.config.json`의 `allowedRoutes`와 `originalApiUrl`을 `/aleph.json`에도 기록합니다. 경로가 비었거나 `메서드 /api/경로` 형식이 아니면, 또는 `originalApiUrl`이 쿼리·`#`·`@`·공백 없는 `https` 주소가 아니면 빌드가 실패합니다.
 - Vercel **Settings → Environment Variables**에 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`가 있어야 합니다. 값은 학생이 그 화면에 직접 넣습니다.
 
 **남은 약점:** 요청 횟수 제한이 없습니다. 공개 키는 `/api/auth-config`로 누구나 받을 수 있으므로, 원본 자료 API 보호는 DB 권한 회수에 달려 있습니다. 옛 커밋과 옛 배포에는 화면 코드에 적었던 공개 키가 남아 있습니다.
@@ -67,6 +67,21 @@ npm run bundle
 ```
 
 `npm run bundle`은 커밋되지 않은 파일이 없고, Git에서 제외된 `bundle-notes.json`(이번 단계 설명)이 있을 때만 `artifacts/submission.json`을 만듭니다. 공격 점검은 `aleph.config.json`의 `publicAppUrl`에 실제로 요청을 보낸 결과만 기록하며 심판 판정이 아닙니다. 학생 프로젝트의 서명 키가 필요한 만료·다른 서비스 토큰 점검과, A·B·시험 계정의 실제 로그인 토큰이 필요한 타인 메모 접근·소유자 변경·원본 API 토큰 직접 호출 점검은 미실행으로 남깁니다. 원본 API 직접 점검은 배포의 `/api/auth-config`에서 공개 키를 받아 요청만 보내고, 키는 기록하지 않습니다. `npm run test:package`의 함수 기준표 시험은 `api/notes.js`가 추가되어 실패합니다.
+
+## 6단계: 등록한 기기만 자료실에 들어옵니다
+
+- `src/decider.mjs`의 `device_registered` 규칙은 판정 요청의 `deviceRegistered`가 정확히 `true`인 읽기(`GET`) 요청만 `allow`(`approved`)합니다. `false`이거나 값이 없거나 다른 값이면 `deny`·`device_not_registered`입니다. 등록 기기의 읽기 아닌 요청은 기존 `starter.deny`로 거부됩니다.
+- 판정기는 [docs/DECIDER_REQUEST.md](docs/DECIDER_REQUEST.md) 계약의 `requestId`·`deviceRegistered`·`method`만 읽습니다. 자료실 API(`api/`), 헤더, 환경변수는 바뀌지 않았습니다.
+- 따로 설치할 접속 프로그램은 없습니다. 미등록 기기로 실제 접속하는 공격은 심판이 맡습니다.
+- `src/attack-check.mjs`에 6단계 점검이 아직 없어, 지금은 `npm run bundle`이 그 파일에서 멈춥니다.
+
+### 확인 순서
+
+1. `npm ci`로 의존성을 설치합니다.
+2. `npm run decider:test`를 실행합니다.
+3. 출력에 `통과 · 등록 기기의 정상 요청`과 `통과 · 미등록 기기의 가상 요청`이 모두 있어야 합니다. 두 번째 줄은 `deviceRegistered: false` 요청이 `deny`·`device_not_registered`로 거부됐다는 뜻입니다. `확인 필요`가 하나라도 나오면 실패입니다.
+
+이 시험은 가상 요청으로 하는 로컬 연습이며 심판 판정이나 실제 기기 접속 증거가 아닙니다. 2026-10-14 로컬 실행에서는 두 줄 모두 통과했습니다.
 
 ## 가상 메모 노출 확인 절차
 
