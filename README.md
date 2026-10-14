@@ -83,6 +83,26 @@ npm run bundle
 
 이 시험은 가상 요청으로 하는 로컬 연습이며 심판 판정이나 실제 기기 접속 증거가 아닙니다. 2026-10-14 로컬 실행에서는 두 줄 모두 통과했습니다.
 
+## 7단계: 평소와 다른 접속은 다시 확인합니다
+
+- 판정기는 계약의 `signals`·`recentEvents`·`stepUp`만 읽습니다. 계약 18개 이름 밖의 값(브라우저 헤더, `role`, `identity`, `device` 등)이 붙거나 형식이 틀린 요청은 `starter.deny`로 거부합니다. `signals.source`가 `none`이면 지역·네트워크·시각을 모르는 값(`null`)으로 두고, `judge_fixture`가 아닌 다른 출처의 값은 버립니다. 모르는 값은 정상값으로 채우지 않습니다.
+- 이상 징후는 새벽 0~5시(`anomaly.off_hours`), `usual`이 아닌 네트워크(`anomaly.new_network`), `local`이 아닌 지역(`anomaly.region_change`), 최근 10분 사건 합계 10건 이상(`anomaly.activity_burst`)입니다. 두 가지 이상 겹치면 `step_up`·`step_up_required`로 추가 확인을 요구하고, 걸린 징후 이름을 `ruleIds`에 사유로 남깁니다. 지역 급변 하나로는 막지 않으며, 이 규칙은 영구 차단(`deny`)을 하지 않습니다.
+- 6단계 `device_registered` 규칙이 먼저 적용됩니다. 미등록이면 이상 징후와 관계없이 `device_not_registered`입니다.
+
+### 재로그인 계약 확인 (2026-10-14)
+
+- **있는 것:** `docs/DECIDER_REQUEST.md`의 판정 요청에 `stepUp: {verified, authAgeSeconds}`가 있습니다. 엔진이 추가 본인 확인 완료 여부와 그 뒤 지난 시간(0~900초)을 넣어 보냅니다. 판정기는 확인 전(`verified: false`)에는 복합 이상 요청을 `step_up`으로 막고, 새 로그인 뒤 엔진이 `verified: true`로 다시 보낸 요청을 다시 판정해 읽기는 `allow`합니다.
+- **없는 것:** 엔진이 이 판정으로 배포의 `/api/notes` 자료 접근을 실제로 막는 연결은 이 저장소에 없습니다. 자료 API는 판정기를 부르지 않고, 로그인 토큰 검사(`src/verify-login.mjs`)에도 재로그인 시각 계약이 없습니다. 계약상 실제 경로의 `signals`는 `source: "none"`이라 지역·시각·네트워크 징후가 생기지 않습니다.
+- 그래서 **실제 자료 차단은 미실행**입니다. 가상 사건 규칙만 시험했습니다. 시험과 기록에 로그인 토큰 원문을 넣지 않습니다.
+
+### 확인 순서
+
+1. `npm ci`로 의존성을 설치합니다.
+2. `npm run decider:test`를 실행합니다. `통과` 네 줄(등록 기기의 정상 요청, 미등록 기기의 가상 요청, 복합 이상 접속, 다시 확인한 복합 이상 접속)이 나와야 합니다. 세 번째 줄은 확인 전 요청이 `step_up`·`step_up_required`로 막혔다는 뜻이고, 네 번째 줄은 재로그인 뒤 같은 요청이 `allow`라는 뜻입니다. `확인 필요`가 하나라도 나오면 실패입니다.
+3. `npm run fixture:7`을 실행합니다. `정상 사건: allow`, `복합 이상 사건: step_up`이 나와야 합니다.
+
+2026-10-14 로컬 실행에서 두 명령 모두 통과했습니다. 가상 요청 연습이며 심판 판정이나 실제 접속 차단 증거가 아닙니다. 같은 날 저장소를 새로 받아 `npm install`을 실행했을 때 의존성(`@supabase/supabase-js@2.117.2`, `jose@6.2.12`) 설치 오류가 없었습니다. `npm run bundle`의 `src/attack-check.mjs`는 7단계에서 6단계까지의 실제 요청 점검을 그대로 보내고, 복합 이상 접속의 실제 차단(`anomalous_access_step_up`)은 미실행으로 기록합니다.
+
 ## 가상 메모 노출 확인 절차
 
 검색어는 메모 본문·제목 일부입니다. `[가]`처럼 한 글자를 괄호로 감싼 정규식을 써서 이 README 자체는 검색에 걸리지 않게 합니다. Windows의 Git 기본 정규식은 이런 한글 괄호식을 놓치므로 `git grep`에는 반드시 `-P`를 붙이세요. 화면 확인 때는 `supabase/*.local.sql`의 `content` 값을 그대로 검색하세요.

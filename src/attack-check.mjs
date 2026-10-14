@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -16,6 +16,7 @@ export async function runAttackChecks(config) {
   if (config.step === 4) return runStep4Checks(app, config);
   if (config.step === 5) return runStep5Checks(app, config);
   if (config.step === 6) return runStep6Checks(app, config);
+  if (config.step === 7) return runStep7Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -203,5 +204,14 @@ async function runStep6Checks(app, config) {
     ...earlier,
     { attackId: 'unregistered_device_access', expected: '미등록 기기의 자료실 읽기 요청이 device_not_registered로 거부됨',
       observed: '미실행: 미등록 기기 접속은 심판이 맡으며, 이 점검은 기기 접속 요청을 보내지 않음' },
+  ];
+}
+
+async function runStep7Checks(app, config) {
+  const earlier = await runStep6Checks(app, config);
+  return [
+    ...earlier,
+    { attackId: 'anomalous_access_step_up', expected: '평소와 다른 시각·새 네트워크·활동 급증이 겹친 요청은 재로그인 확인 전 step_up_required로 자료 접근이 막힘',
+      observed: '미실행: 엔진이 판정으로 배포 자료 API를 막는 연결이 저장소에 없고 실제 경로 신호는 source none이라 보내지 않음(토큰 원문 기록 안 함)' },
   ];
 }
