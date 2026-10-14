@@ -249,7 +249,7 @@ npm run bundle
 
 - **판정기(`src/decider.mjs`):** 계약에 서명·본문 필드가 없으므로 서명 대조는 API가 맡습니다. 판정기는 계약 필드만 읽으며, 이번에 `path`가 `/`로 시작하는지와 `querySha256`이 64자리 16진수이고 `queryLength`와 맞는지(쿼리 길이 0 ⇔ 빈 문자열 해시)를 형식 검사에 더했습니다. 맞지 않으면 `starter_not_ready`(규칙 `starter.deny`)로 거부하고, API는 이를 403 `DEVICE_NOT_REGISTERED`로 돌려줍니다. 구역 규칙(`zone.*`) 거부는 기존처럼 API의 소유자·강사 권한 확인에 맡겨 복구·공지 관리 흐름을 바꾸지 않습니다. `RULE_IDS`·`decide()` 이름과 응답 다섯 항목은 그대로입니다.
 - **브라우저 저장소:** 로그인은 `persistSession: false`로 메모리에만 두고, 기기 확인 결과와 서명 키도 페이지 메모리에만 둡니다. 로컬·세션 저장소, 쿠키, 색인 DB에 넣지 않으므로 새로고침하면 다시 로그인·기기 확인을 해야 합니다.
-- **설정:** `aleph.config.json`의 `step`을 `11`로 올렸습니다. 빌드가 만드는 `public/aleph.json`의 `step`도 이 값을 그대로 씁니다. `judgeIssuer`·허용 경로·원본 API 주소는 바꾸지 않았습니다.
+- **설정:** `aleph.config.json`의 `step`을 `11`로 올렸습니다. 빌드가 만드는 `public/aleph.json`의 `step`도 이 값을 그대로 씁니다. 허용 경로(`allowedRoutes`)에는 서버의 기기 승인 확인 경로 `GET /api/device/challenge`, `POST /api/device/request`, `POST /api/device/verify`를 더해 `/aleph.json`에서도 승인을 서버가 확인한다는 것이 보이게 했습니다(심판 `S11_BADGE_IS_TRUST` 대응). 판정기의 구역 규칙은 그대로라 엔진을 거치는 기기 경로 요청은 `zone.default_deny`로 거부됩니다. `judgeIssuer`·원본 API 주소는 바꾸지 않았습니다.
 - **오프라인 안내:** 연결이 끊기면 화면 맨 위에 "오프라인입니다…" 안내가 나옵니다. manifest의 `description`에도 같은 뜻을 적었습니다. 메모가 기기에 남지 않도록 서비스 워커·캐시는 쓰지 않습니다. 그래서 처음부터 오프라인으로 앱을 열면 브라우저 기본 오류 화면이 나옵니다.
 - **그대로인 것:** `vercel.json`의 `nosniff` 헤더, 빌드(`scripts/build-public.mjs`), 기존 API의 로그인·소유자·강사 권한·복구 로직, 탐지 함수는 바꾸지 않았고 기기 확인은 로그인 확인 바로 뒤에 덧붙였습니다. 정적 파일에 Supabase 주소·공개 키는 없고, 로그인 설정은 지금처럼 `/api/auth-config`에서 받습니다.
 

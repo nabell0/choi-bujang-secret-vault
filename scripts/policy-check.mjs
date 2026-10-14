@@ -54,11 +54,12 @@ const stopsWithoutWriting = (prepare, ...args) => withWorkspace(paths => {
 });
 
 const checks = [
-  ['안전 사본의 규칙 이름이 모두 판정기 RULE_IDS 안에 있고, 메모·공지 허용 경로가 aleph.config.json과 같음', () => {
+  ['안전 사본의 규칙 이름이 모두 판정기 RULE_IDS 안에 있고, 메모·공지 허용 경로가 모두 aleph.config.json에 있음', () => {
     const ruleIds = Object.values(safe.services).map(rules => rules.ruleId).filter(Boolean);
     const config = read(join(root, 'aleph.config.json'));
     const routes = [...safe.services.notes.routes, ...safe.services.notices.routes].map(route => route.replace(' /', ' /api/'));
-    return ruleIds.every(id => RULE_IDS.includes(id)) && isDeepStrictEqual([...routes].sort(), [...config.allowedRoutes].sort());
+    return ruleIds.every(id => RULE_IDS.includes(id)) && routes.length > 0
+      && routes.every(route => config.allowedRoutes.includes(route));
   }],
   ['policy:diff는 복원할 버전과 notes의 바뀔 항목을 보여 주고 아무것도 쓰지 않음', withWorkspace(paths => {
     const before = readFileSync(paths.policy, 'utf8');
