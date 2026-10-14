@@ -183,7 +183,7 @@ npm run bundle
 
 | 단계 | 정상 요청 (유지) | 금지 요청 (다시 거부) | 2026-10-14 결과 |
 | --- | --- | --- | --- |
-| 1 | 첫 화면 `/` 200 | `/data.json`·정적 파일의 메모 | 배포(`aae1ff8`)에 실제 요청: `/data.json` 404, 정적 파일 3개 메모 없음 |
+| 1 | 첫 화면 `/` 200 | `/data.json`·정적 파일의 메모 | 배포(`c039e3d`)에 실제 요청: `/data.json` 404, 정적 파일 3개 메모 없음 |
 | 2 | 모든 응답 `nosniff` | — | 배포 응답 3개에 `nosniff`, `vercel.json`의 `/(.*)` 헤더 그대로 |
 | 3 | A 로그인 후 메모 목록 | 토큰 없는 GET·POST `/api/notes`, 위조 서명 토큰 | 배포에 실제 요청: 401 `LOGIN_REQUIRED`·`INVALID_LOGIN_TOKEN`. 만료·다른 서비스 토큰은 **미실행**. A 로그인 정상 요청은 배포에서 **미실행** |
 | 4 | A의 자기 메모 읽기·수정 | 토큰 없는 `/api/notes/:id`, B의 A 메모 읽기·수정·삭제, 본문 `owner_id` | 배포에 실제 요청: 토큰 없는 GET·PUT·DELETE 401. 타인 메모 거부와 A 정상 요청은 로컬 가짜 DB(`owner:check`)에서만 확인, 실제 A·B 계정은 **미실행** |
@@ -192,14 +192,15 @@ npm run bundle
 | 7 | 정상 사건 `allow` | 복합 이상 사건 `step_up` | 가상 요청(`decider:test`, `fixture:7`)만 통과. 배포 경로 차단은 **미실행** |
 | 8 | 메모 단건·공지 읽기 `allow` | 메모 목록·공지 쓰기·강사 자료·`export`·쿼리 붙은 요청 | 가상 요청 20건 형식 검사 통과. 배포에 실제 요청: 토큰 없는 공지 수정·관리 경로·강사 자료 401. 학생 토큰 공지 수정은 **미실행** |
 | 9 | 정상 사건 `observe` | 의심 사건 `burst_read` 회수 제안 | 가상 요청(`decider:test`, `detect:test`)만 통과. 실제 회수는 **미실행**(심판 담당) |
-| 10 | B가 자기 메모 복원 200 | 토큰 없는 복원, A의 B 메모 복원 | 로컬 가짜 DB(`restore:check`)만 통과. 배포에 실제 보낸 토큰 없는 복원은 **404**(복구 경로가 아직 배포 안 됨). 실제 B 계정 복원은 **미실행** |
+| 10 | B가 자기 메모 복원 200 | 토큰 없는 복원, A의 B 메모 복원 | 로컬 가짜 DB(`restore:check`)만 통과. 배포에 실제 보낸 토큰 없는 복원은 401 `LOGIN_REQUIRED`. 실제 B 계정 복원은 **미실행** |
 
-2026-10-14 점검 기록(이 변경은 아직 커밋·배포 전):
-- `aleph.config.json`의 `step`은 10입니다. 가짜 Vercel 값으로 빌드 식별 함수를 돌려 `/aleph.json`에 `step: 10`, 기존 `allowedRoutes` 세 개, `originalApiUrl`이 그대로 실리는 것을 확인했습니다. 배포된 `/aleph.json`은 아직 `step: 9`(`aae1ff8`)입니다.
+2026-10-14 점검 기록(10단계 저장점 `c039e3d` 배포 기준):
+- `aleph.config.json`의 `step`은 10입니다. 배포된 `/aleph.json`이 `step: 10`, 커밋 `c039e3d`이고, 기존 `allowedRoutes` 세 개와 `originalApiUrl`이 그대로 실립니다.
+- `npm run bundle`의 직접 점검 20개 중 15개를 배포에 실제로 보냈고 모두 위 표대로 거부·정상이었습니다. 나머지 5개는 미실행입니다.
 - 판정기는 계약의 요청 이름만 읽습니다. `role`·`identity`·`device`를 붙인 요청과 빈 요청을 포함한 가상 요청 20건 모두 응답이 다섯 항목 형식이었고, `ruleIds`는 모두 `RULE_IDS` 안에 있었습니다. `allowedRoutes` 세 경로는 판정기에서 `allow`, 복구 경로는 `zone.default_deny`였습니다.
 - `public/`에는 `index.html`만 있고 `data.json`이 없으며, Supabase 키 형태 문자열과 시드 표식은 0개입니다.
 - 저장소를 새로 받아 `npm install`을 실행했을 때 오류와 취약점 경고가 없었고 `package-lock.json`이 바뀌지 않았습니다.
-- 가상 요청과 로컬 시험은 심판 판정이 아니고, 배포 요청은 이 변경 전 배포본에 보낸 결과입니다.
+- 가상 요청과 로컬 시험, 학생이 보낸 배포 요청 기록은 심판 판정이 아닙니다.
 
 **공격 점검:** `npm run bundle`의 `src/attack-check.mjs`는 10단계에서 9단계까지의 실제 요청 점검에 토큰 없는 `POST /api/restore/notes/:id`(B 시험 메모, `anonymous_note_restore`)를 더 보냅니다. 직접 점검 최대 20개에 맞추려고, 같은 이유(실제 계정 토큰 필요)로 미실행인 계정 토큰 점검과 학생 공지 수정 점검을 `account_token_access` 한 항목으로 합쳤습니다.
 
