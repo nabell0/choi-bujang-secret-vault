@@ -73,7 +73,7 @@ npm run bundle
 - `src/decider.mjs`의 `device_registered` 규칙은 판정 요청의 `deviceRegistered`가 정확히 `true`인 읽기(`GET`) 요청만 `allow`(`approved`)합니다. `false`이거나 값이 없거나 다른 값이면 `deny`·`device_not_registered`입니다. 등록 기기의 읽기 아닌 요청은 기존 `starter.deny`로 거부됩니다.
 - 판정기는 [docs/DECIDER_REQUEST.md](docs/DECIDER_REQUEST.md) 계약의 `requestId`·`deviceRegistered`·`method`만 읽습니다. 자료실 API(`api/`), 헤더, 환경변수는 바뀌지 않았습니다.
 - 따로 설치할 접속 프로그램은 없습니다. 미등록 기기로 실제 접속하는 공격은 심판이 맡습니다.
-- `src/attack-check.mjs`에 6단계 점검이 아직 없어, 지금은 `npm run bundle`이 그 파일에서 멈춥니다.
+- `npm run bundle`의 `src/attack-check.mjs`는 6단계에서 5단계까지의 실제 요청 점검을 그대로 보내고, 미등록 기기 접속(`unregistered_device_access`)은 미실행으로 기록합니다.
 
 ### 확인 순서
 

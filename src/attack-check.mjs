@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -15,6 +15,7 @@ export async function runAttackChecks(config) {
   if (config.step === 3) return runStep3Checks(app, config);
   if (config.step === 4) return runStep4Checks(app, config);
   if (config.step === 5) return runStep5Checks(app, config);
+  if (config.step === 6) return runStep6Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -193,5 +194,14 @@ async function runStep5Checks(app, config) {
       observed: '미실행: 시험 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
     { attackId: 'static_files_key_marker_search', expected: '첫 화면과 index.html에 Supabase 키 형태 문자열과 시드 표식이 없음',
       observed: `정적 파일 ${fetched.length}/2개 받음, 키 형태 문자열 포함 ${keyHits}개, 시드 표식 포함 ${markerHits}개` },
+  ];
+}
+
+async function runStep6Checks(app, config) {
+  const earlier = await runStep5Checks(app, config);
+  return [
+    ...earlier,
+    { attackId: 'unregistered_device_access', expected: '미등록 기기의 자료실 읽기 요청이 device_not_registered로 거부됨',
+      observed: '미실행: 미등록 기기 접속은 심판이 맡으며, 이 점검은 기기 접속 요청을 보내지 않음' },
   ];
 }
