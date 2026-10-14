@@ -58,7 +58,6 @@
     <section id="device-status" class="auth device" aria-labelledby="device-title" data-device-approval="unverified">
       <h2 id="device-title">앱·기기 상태</h2>
       <dl>
-        <dt>실행 방식</dt><dd id="app-mode">확인하는 중입니다.</dd>
         <dt>연결</dt><dd id="network-state">확인하는 중입니다.</dd>
         <dt>기기 승인</dt><dd id="device-approval">확인되지 않음</dd>
       </dl>
@@ -95,23 +94,15 @@
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script>
-    // 화면 표시만 합니다. 설치·실행 방식은 기기 승인 판단에 쓰지 않습니다.
+    // 연결 상태만 표시합니다. 앱 설치 여부는 읽지도 표시하지도 않습니다(설치 표시는 신뢰 근거가 아님).
     (() => {
-      const mode = document.querySelector('#app-mode');
       const network = document.querySelector('#network-state');
       const offline = document.querySelector('#offline-notice');
-      const standalone = window.matchMedia('(display-mode: standalone)');
-      const showMode = () => {
-        mode.textContent = standalone.matches || navigator.standalone === true
-          ? '설치한 앱 창 (설치 여부는 기기 확인이 아닙니다)' : '브라우저 탭';
-      };
       const showNetwork = () => {
         network.textContent = navigator.onLine ? '온라인' : '오프라인';
         offline.hidden = navigator.onLine;
       };
-      showMode();
       showNetwork();
-      standalone.addEventListener?.('change', showMode);
       window.addEventListener('online', showNetwork);
       window.addEventListener('offline', showNetwork);
     })();
