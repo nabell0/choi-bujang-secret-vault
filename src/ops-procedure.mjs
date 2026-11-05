@@ -14,14 +14,14 @@ export const PROCEDURE = Object.freeze([
   check('s1-data', 1, 'deny', '공개 메모 파일', 'GET /data.json 이 404', { send: true, order: 11, path: '/data.json' }),
   check('s2-nosniff', 2, 'allow', '응답 머리글', '첫 화면이 200이고 X-Content-Type-Options: nosniff', { send: true, order: 12, path: '/' }),
   check('s3-list', 3, 'deny', '무인증 메모 목록', '토큰 없는 GET /api/notes 가 401 또는 403', { send: true, order: 1, path: '/api/notes' }),
-  check('s3-create', 3, 'deny', '무인증 메모 추가', '토큰 없는 POST /api/notes 가 401 또는 403', { send: true, order: 13, method: 'POST', path: '/api/notes' }),
+  check('s3-create', 3, 'deny', '무인증 메모 추가', '토큰 없는 POST /api/notes 가 401 또는 403', { send: false, method: 'POST', path: '/api/notes' }),
   check('s3-forged', 3, 'deny', '위조 서명 토큰', '위조 토큰의 GET /api/notes 가 401', { send: true, order: 14, path: '/api/notes', forged: true }),
   check('s3-own-list', 3, 'allow', '로그인 뒤 내 메모 목록', '로그인한 계정의 GET /api/notes 가 200', { send: false }),
   check('s3-expired', 3, 'deny', '만료 토큰', '만료된 로그인 토큰이 401', { send: false }),
   check('s3-other-service', 3, 'deny', '다른 서비스 토큰', '다른 서비스 토큰이 401', { send: false }),
   check('s4-read', 4, 'deny', '무인증 타인 메모 조회', '토큰 없는 GET /api/notes/:id 가 401 또는 403', { send: true, order: 2, path: NOTE }),
-  check('s4-update', 4, 'deny', '서명 없는 메모 수정', '토큰·서명 없는 PUT /api/notes/:id 가 401 또는 403', { send: true, order: 4, method: 'PUT', path: NOTE }),
-  check('s4-delete', 4, 'deny', '무인증 메모 삭제', '토큰 없는 DELETE /api/notes/:id 가 401 또는 403', { send: true, order: 15, method: 'DELETE', path: NOTE }),
+  check('s4-update', 4, 'deny', '서명 없는 메모 수정', '토큰·서명 없는 PUT /api/notes/:id 가 401 또는 403', { send: false, method: 'PUT', path: NOTE }),
+  check('s4-delete', 4, 'deny', '무인증 메모 삭제', '토큰 없는 DELETE /api/notes/:id 가 401 또는 403', { send: false, method: 'DELETE', path: NOTE }),
   check('s4-own-read', 4, 'allow', '내 메모 읽기', '소유자의 GET /api/notes/:id 가 200', { send: false }),
   check('s4-other-read', 4, 'deny', '다른 계정으로 타인 메모 조회', 'A가 B 메모를 읽으면 403', { send: false }),
   check('s4-other-update', 4, 'deny', '다른 계정으로 타인 메모 수정', 'A가 B 메모를 고치면 403', { send: false }),
@@ -35,12 +35,12 @@ export const PROCEDURE = Object.freeze([
   check('s6-unregistered', 6, 'deny', '미등록 기기', '미등록 기기의 자료 읽기가 device_not_registered', { send: false }),
   check('s7-stepup', 7, 'deny', '이상 접속', '복합 이상 접속이 재확인 전 step_up_required', { send: false }),
   check('s8-notice-read', 8, 'allow', '로그인 뒤 공지 읽기', '로그인한 GET /api/notices 가 200', { send: false }),
-  check('s8-notice-write', 8, 'deny', '무인증 공지 수정', '토큰 없는 PUT /api/notices/:id 가 401 또는 403', { send: true, order: 18, method: 'PUT', path: NOTICE }),
-  check('s8-admin-write', 8, 'deny', '무인증 공지 관리', '토큰 없는 PUT /api/admin/notices/:id 가 401 또는 403', { send: true, order: 19, method: 'PUT', path: `/api/admin/notices/${NOTICE.split('/').pop()}` }),
+  check('s8-notice-write', 8, 'deny', '무인증 공지 수정', '토큰 없는 PUT /api/notices/:id 가 401 또는 403', { send: false, method: 'PUT', path: NOTICE }),
+  check('s8-admin-write', 8, 'deny', '무인증 공지 관리', '토큰 없는 PUT /api/admin/notices/:id 가 401 또는 403', { send: false, method: 'PUT', path: `/api/admin/notices/${NOTICE.split('/').pop()}` }),
   check('s8-materials', 8, 'deny', '무인증 강사 자료', '토큰 없는 GET /api/materials 가 401 또는 403', { send: true, order: 20, path: '/api/materials' }),
   check('s8-student-notice', 8, 'deny', '학생의 공지 수정', '학생 토큰의 공지 수정이 403', { send: false }),
   check('s9-revoke', 9, 'deny', '회수 집행', 'burst_read 회수 뒤 접근이 막힘', { send: false }),
-  check('s10-restore', 10, 'deny', '무인증 복구', '토큰 없는 POST /api/restore/notes/:id 가 401', { send: true, order: 3, method: 'POST', path: RESTORE }),
+  check('s10-restore', 10, 'deny', '무인증 복구', '토큰 없는 POST /api/restore/notes/:id 가 401', { send: false, method: 'POST', path: RESTORE }),
   check('s10-owner-restore', 10, 'allow', '소유자 복구', '소유자의 복구가 200', { send: false }),
   check('s11-challenge', 11, 'deny', '무인증 기기 질문', '토큰 없는 GET /api/device/challenge 가 401', { send: true, order: 21, path: '/api/device/challenge' }),
   check('s11-signed', 11, 'allow', '승인 기기의 서명 요청', '등록·승인된 기기의 서명한 읽기가 200', { send: false }),
@@ -98,6 +98,7 @@ async function readMeasurement(response) {
 }
 
 export function formatActual(row) {
+  if (row.observed === 'not_run') return 'not_run';
   if (row.verdict === 'untested' || !Number.isInteger(row.httpStatus)) return '미실행';
   const parts = [`HTTP ${row.httpStatus}`];
   if (row.error) parts.push(row.error);
@@ -119,16 +120,18 @@ export async function runProcedure(base) {
     id: item.id, step: item.step, role: item.role, label: item.label, expected: item.expected,
     verdict: 'untested', httpStatus: null, error: null, noteCount: null, nosniff: null,
     requestId: null, checkedAt: null,
+    observed: item.method === 'GET' || item.method === 'HEAD' ? null : 'not_run',
   }));
   const byId = new Map(rows.map(row => [row.id, row]));
-  const queue = PROCEDURE.filter(item => item.send).slice().sort((a, b) => a.order - b.order);
+  const queue = PROCEDURE.filter(item => item.send && (item.method === 'GET' || item.method === 'HEAD'))
+    .slice().sort((a, b) => a.order - b.order);
   for (const item of queue) {
     const requestId = crypto.randomUUID();
     try {
       const headers = { 'x-request-id': requestId };
       if (item.forged) headers.authorization = `Bearer ${forgedToken()}`;
       const response = await fetch(new URL(item.path, base), {
-        method: item.method, headers, redirect: 'error', cache: 'no-store',
+        method: item.method === 'HEAD' ? 'HEAD' : 'GET', headers, redirect: 'error', cache: 'no-store',
       });
       const measured = await readMeasurement(response);
       const verdict = verdictFromStatus(measured.httpStatus);

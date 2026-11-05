@@ -275,6 +275,7 @@
       id: item.id, step: item.step, role: item.role, label: item.label, expected: item.expected,
       verdict: 'untested', httpStatus: null, error: null, noteCount: null, nosniff: null,
       requestId: null, checkedAt: null,
+      observed: item.method === 'GET' || item.method === 'HEAD' ? null : 'not_run',
     }));
 
     function renderProcedure(rows) {

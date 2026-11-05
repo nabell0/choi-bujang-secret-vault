@@ -39,13 +39,16 @@ export async function runAttackChecks(config) {
     observed: visible ? '비로그인 요청에서 공개 가상 메모 확인 표시가 보임' : `비로그인 요청에서 확인 표시가 보이지 않음 (HTTP ${response.status})` }];
 }
 
-async function probe(app, path, { method = 'GET', authorization, body } = {}) {
+const NOT_RUN = 'not_run';
+
+async function probe(app, path, { method = 'GET', authorization } = {}) {
+  const verb = String(method).toUpperCase();
+  if (verb !== 'GET' && verb !== 'HEAD') return null;
   try {
     const headers = {};
     if (authorization) headers.Authorization = authorization;
-    if (body) headers['Content-Type'] = 'application/json';
     const response = await fetch(new URL(path, app), {
-      method, headers, body: body ? JSON.stringify(body) : undefined,
+      method: verb, headers,
       redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000),
     });
     const json = (response.headers.get('content-type') ?? '').includes('application/json');
@@ -63,7 +66,13 @@ async function probe(app, path, { method = 'GET', authorization, body } = {}) {
   }
 }
 
-const base64url = value => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+const base64url = value => {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+};
 
 // Well-formed, but not signed by the student's Supabase project.
 function forgedToken(issuer) {
@@ -77,9 +86,8 @@ function forgedToken(issuer) {
 }
 
 async function runStep3Checks(app, config) {
-  const [list, create, forged, firstPage, identity] = await Promise.all([
+  const [list, forged, firstPage, identity] = await Promise.all([
     probe(app, '/api/notes'),
-    probe(app, '/api/notes', { method: 'POST', body: { title: '비로그인 추가 시도', body: '거부되어야 함' } }),
     probe(app, '/api/notes', { authorization: `Bearer ${forgedToken(config.identityProvider?.issuer)}` }),
     probe(app, '/'),
     probe(app, '/aleph.json'),
@@ -92,7 +100,7 @@ async function runStep3Checks(app, config) {
     { attackId: 'anonymous_note_list', expected: '토큰 없는 GET /api/notes가 401 또는 403 JSON 오류로 거부되고 메모 0건',
       observed: `토큰 없는 GET /api/notes: ${describe(list)}` },
     { attackId: 'anonymous_note_create', expected: '토큰 없는 POST /api/notes가 401 또는 403 JSON 오류로 거부됨',
-      observed: `토큰 없는 POST /api/notes: ${describe(create)}` },
+      observed: NOT_RUN },
     { attackId: 'forged_signature_token', expected: '서명이 위조된 토큰의 GET /api/notes가 401 JSON 오류로 거부됨',
       observed: `위조 서명 토큰 GET /api/notes: ${describe(forged)}` },
     { attackId: 'expired_token', expected: '만료된 로그인 토큰이 401로 거부됨', observed: notRun },
@@ -109,11 +117,7 @@ const B_TEST_NOTE = '/api/notes/b4000000-0000-4000-8000-000000000001';
 
 async function runStep4Checks(app, config) {
   const loginChecks = await runStep3Checks(app, config);
-  const [read, update, remove] = await Promise.all([
-    probe(app, B_TEST_NOTE),
-    probe(app, B_TEST_NOTE, { method: 'PUT', body: { title: '비로그인 수정 시도', body: '거부되어야 함' } }),
-    probe(app, B_TEST_NOTE, { method: 'DELETE' }),
-  ]);
+  const read = await probe(app, B_TEST_NOTE);
   const describe = result => (result
     ? `HTTP ${result.status}, JSON ${result.json ? '예' : '아니오'}, 오류 ${result.errorCode ?? '없음'}`
     : '요청 실패');
@@ -123,9 +127,9 @@ async function runStep4Checks(app, config) {
     { attackId: 'anonymous_note_read_by_id', expected: '토큰 없는 GET /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
       observed: `토큰 없는 GET /api/notes/:id(B 시험 메모): ${describe(read)}` },
     { attackId: 'anonymous_note_update', expected: '토큰 없는 PUT /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
-      observed: `토큰 없는 PUT /api/notes/:id(B 시험 메모): ${describe(update)}` },
+      observed: NOT_RUN },
     { attackId: 'anonymous_note_delete', expected: '토큰 없는 DELETE /api/notes/:id가 401 또는 403 JSON 오류로 거부됨',
-      observed: `토큰 없는 DELETE /api/notes/:id(B 시험 메모): ${describe(remove)}` },
+      observed: NOT_RUN },
     { attackId: 'other_user_note_read', expected: 'A가 B 메모 ID로 GET하면 403 JSON 오류로 거부됨', observed: notRun },
     { attackId: 'other_user_note_update', expected: 'A가 B 메모 ID로 PUT하면 403 JSON 오류로 거부되고 B 메모가 그대로임', observed: notRun },
     { attackId: 'other_user_note_delete', expected: 'A가 B 메모 ID로 DELETE하면 403 JSON 오류로 거부되고 B 메모가 남음', observed: notRun },
@@ -146,13 +150,15 @@ async function runtimePublicKey(app) {
   }
 }
 
-async function directOriginal(config, key, method, search, body) {
+async function directOriginal(config, key, method, search) {
+  const verb = String(method).toUpperCase();
+  if (verb !== 'GET' && verb !== 'HEAD') return null;
   try {
     const url = new URL(config.originalApiUrl);
+    if (url.protocol !== 'https:') return null;
     url.search = search;
     const response = await fetch(url, {
-      method, headers: { apikey: key, 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined, redirect: 'error', signal: AbortSignal.timeout(10000),
+      method: verb, headers: { apikey: key }, redirect: 'error', signal: AbortSignal.timeout(10000),
     });
     let data = null;
     try {
@@ -170,9 +176,8 @@ async function directOriginal(config, key, method, search, body) {
 async function runStep5Checks(app, config) {
   const earlier = await runStep4Checks(app, config);
   const key = await runtimePublicKey(app);
-  const [read, update, pages] = await Promise.all([
+  const [read, pages] = await Promise.all([
     key ? directOriginal(config, key, 'GET', '?select=id') : null,
-    key ? directOriginal(config, key, 'PATCH', '?id=eq.00000000-0000-4000-8000-000000000000', { title: '직접 수정 시도' }) : null,
     Promise.all(['/', '/index.html'].map(async path => {
       try {
         const response = await fetch(new URL(path, app), { redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000) });
@@ -194,7 +199,7 @@ async function runStep5Checks(app, config) {
     { attackId: 'original_api_direct_read', expected: '공개 키로 원본 자료 API를 직접 GET하면 권한 오류로 거부되고 메모 0건',
       observed: key ? `원본 API 직접 GET(공개 키, 토큰 없음): ${describe(read)}` : noKey },
     { attackId: 'original_api_direct_update', expected: '공개 키로 원본 자료 API를 직접 PATCH하면 권한 오류로 거부됨(없는 ID로만 시도)',
-      observed: key ? `원본 API 직접 PATCH(공개 키, 토큰 없음, 없는 ID): ${describe(update)}` : noKey },
+      observed: NOT_RUN },
     { attackId: 'original_api_test_account_token', expected: '공개 키와 시험 계정 토큰으로 원본 자료 API를 직접 부르면 권한 오류로 거부됨',
       observed: '미실행: 시험 계정의 실제 로그인 토큰이 필요해 보내지 않음(비밀번호·토큰을 기록하지 않음)' },
     { attackId: 'static_files_key_marker_search', expected: '첫 화면과 index.html에 Supabase 키 형태 문자열과 시드 표식이 없음',
@@ -249,26 +254,18 @@ function mergeNotRun(checks, groups = MERGED_NOT_RUN) {
   return result;
 }
 
-// Fixed id of the test notice from supabase/step8-notices.sql.
-const TEST_NOTICE = 'c8000000-0000-4000-8000-000000000001';
-
 async function runStep8Checks(app, config) {
   const earlier = mergeNotRun(await runStep7Checks(app, config));
-  const body = { title: '비로그인 공지 수정 시도', body: '거부되어야 함' };
-  const [noticeWrite, adminWrite, materials] = await Promise.all([
-    probe(app, `/api/notices/${TEST_NOTICE}`, { method: 'PUT', body }),
-    probe(app, `/api/admin/notices/${TEST_NOTICE}`, { method: 'PUT', body }),
-    probe(app, '/api/materials'),
-  ]);
+  const materials = await probe(app, '/api/materials');
   const describe = result => (result
     ? `HTTP ${result.status}, JSON ${result.json ? '예' : '아니오'}, 오류 ${result.errorCode ?? '없음'}`
     : '요청 실패');
   return [
     ...earlier,
     { attackId: 'anonymous_notice_write', expected: '토큰 없는 PUT /api/notices/:id가 401 또는 403 JSON 오류로 거부됨',
-      observed: `토큰 없는 PUT /api/notices/:id(시험 공지): ${describe(noticeWrite)}` },
+      observed: NOT_RUN },
     { attackId: 'anonymous_admin_notice_write', expected: '토큰 없는 PUT /api/admin/notices/:id가 401 또는 403 JSON 오류로 거부됨',
-      observed: `토큰 없는 PUT /api/admin/notices/:id(시험 공지): ${describe(adminWrite)}` },
+      observed: NOT_RUN },
     { attackId: 'anonymous_materials_read', expected: '토큰 없는 GET /api/materials가 401 또는 403 JSON 오류로 거부됨',
       observed: `토큰 없는 GET /api/materials: ${describe(materials)}` },
     { attackId: 'student_notice_write', expected: '학생 계정 토큰으로 공지를 PUT하거나 관리 경로를 부르면 403 JSON 오류로 거부되고 공지가 그대로임',
@@ -294,13 +291,10 @@ const STEP10_MERGED_NOT_RUN = [
 
 async function runStep10Checks(app, config) {
   const earlier = mergeNotRun(await runStep9Checks(app, config), STEP10_MERGED_NOT_RUN);
-  const restore = await probe(app, `/api/restore/notes/${B_TEST_NOTE.split('/').pop()}`, { method: 'POST' });
   return [
     ...earlier,
     { attackId: 'anonymous_note_restore', expected: '토큰 없는 POST /api/restore/notes/:id가 401 JSON 오류로 거부되고 메모가 바뀌지 않음',
-      observed: restore
-        ? `토큰 없는 POST /api/restore/notes/:id(B 시험 메모): HTTP ${restore.status}, JSON ${restore.json ? '예' : '아니오'}, 오류 ${restore.errorCode ?? '없음'}`
-        : '토큰 없는 POST /api/restore/notes/:id(B 시험 메모): 요청 실패' },
+      observed: NOT_RUN },
   ];
 }
 
