@@ -467,11 +467,13 @@ export function createStudentView({ onChange } = {}) {
         if (['AI_REQUEST_UNVERIFIED', 'SUBJECT_SCOPE_UNVERIFIED', 'ON_AI_INVALID_INPUT', 'ON_AI_INVALID_OUTPUT'].includes(code)) return '확인 불가입니다. 담당자에게 계정 연결과 앱 권한 확인을 요청하세요.';
         if (code === 'WB_CLCO_AUTH_REQUIRED') return '인증 실패입니다. 계정 연결을 다시 확인하고 담당자에게 확인을 요청하세요.';
         if (code === 'WB_CLCO_ACCESS_BLOCKED') return '접근 제한입니다. 계정 연결을 다시 확인하고 담당자에게 확인을 요청하세요.';
-        if (['WB_CLCO_COHORT_BUDGET_EXHAUSTED', 'WB_CLCO_LIMIT_REACHED'].includes(code)) return '사용량 또는 이용 한도 문제입니다. 담당자에게 확인을 요청하세요.';
-        if (code === 'WB_CLCO_SESSION_CLOSED') return '이용 시간이 아닙니다. 이용 시간을 확인하세요.';
+        if (code === 'WB_CLCO_COHORT_BUDGET_EXHAUSTED') return `${code}는 반 사용량 문제입니다. 사용량·한도·제한·시간 문제 가운데 사용량이 소진됐습니다. 담당자에게 확인을 요청하세요.`;
+        if (code === 'WB_CLCO_LIMIT_REACHED') return `${code}는 이용 한도 문제입니다. 사용량·한도·제한·시간 문제 가운데 이용 한도에 도달했습니다. 담당자에게 확인을 요청하세요.`;
+        if (code === 'WB_CLCO_RATE_LIMITED') return `${code}는 요청 제한 문제입니다. 사용량·한도·제한·시간 문제 가운데 요청이 제한됐습니다. 잠시 뒤 직접 다시 점검하세요.`;
+        if (code === 'WB_CLCO_INVALID_LIMIT') return `${code}는 요청 제한 시간 문제입니다. 사용량·한도·제한·시간 문제 가운데 요청 제한 시간을 확인하세요.`;
+        if (code === 'WB_CLCO_SESSION_CLOSED') return `${code}는 이용 시간 문제입니다. 사용량·한도·제한·시간 문제 가운데 이용 시간이 아닙니다. 이용 시간을 확인하세요.`;
         if (['WB_CLCO_TIMEOUT', 'REQUEST_TIMEOUT', 'ENGINE_TIMEOUT', 'TIMEOUT'].includes(code)) return '시간 초과입니다. 잠시 뒤 현재 API 연결 점검 버튼을 직접 눌러 다시 점검하세요.';
-        if (code === 'WB_CLCO_RATE_LIMITED') return '요청 제한입니다. 잠시 뒤 직접 다시 점검하세요.';
-        if (code === 'NETWORK_ERROR') return '네트워크 연결 문제입니다. 잠시 뒤 직접 다시 점검하세요.';
+        if (code === 'NETWORK_ERROR' || code === 'WB_CLCO_NETWORK_ERROR') return '네트워크 연결 문제입니다. 잠시 뒤 직접 다시 점검하세요.';
         if (['WB_CLCO_CANCELLED', 'CANCELLED', 'REQUEST_CANCELLED'].includes(code)) return '취소됨. 이전 결과는 현재 결과가 아닙니다.';
         if (['ON_AI_MODEL_LIST_EMPTY', 'MODEL_NOT_CONFIGURED'].includes(code)) return '쓸 수 있는 모델이 없습니다. 담당자에게 모델 허용 설정 확인을 요청하세요.';
         return '확인 불가입니다. 연결 점검이 끝난 것이 아닙니다.';
