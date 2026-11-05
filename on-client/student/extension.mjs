@@ -452,8 +452,100 @@ export function createStudentView({ onChange } = {}) {
       return root;
     },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
-    renderAiConnection() { return '학생 구현 대기: 모델 응답 점검과 실제 사건 설명을 구분하고 AI 오류·취소·수동 복구를 안내하세요.'; },
-    renderExplanation() { return '학생 구현 대기: 선택한 사건의 근거·규칙·현재 상태와 AI 설명을 연결하세요. 제안은 자동 실행하지 않습니다.'; },
+    renderAiConnection(input) {
+      const add = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const secret = /(?:bearer\s+\S+|sk-[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{8,}\.|api[_ -]?key|password|비밀번호|토큰|열쇠)/i;
+      const safeText = (value) => (typeof value === 'string' && value.length > 0 && value.length <= 500 && !secret.test(value) ? value : '');
+      const safeCode = (value) => (typeof value === 'string' && /^[A-Z0-9_]{1,64}$/.test(value) ? value : '확인 불가');
+      const guidance = (code) => {
+        if (['ON_AI_PROVISIONING_PENDING', 'ON_AI_AUTHORIZATION_CHANGED'].includes(code)) return '권한 준비 중입니다. 담당자에게 계정 연결과 앱 권한 확인을 요청하세요. 학생 코드의 잘못이 아닙니다.';
+        if (['AI_REQUEST_UNVERIFIED', 'SUBJECT_SCOPE_UNVERIFIED', 'ON_AI_INVALID_INPUT', 'ON_AI_INVALID_OUTPUT'].includes(code)) return '확인 불가입니다. 담당자에게 계정 연결과 앱 권한 확인을 요청하세요.';
+        if (code === 'WB_CLCO_AUTH_REQUIRED') return '인증 실패입니다. 계정 연결을 다시 확인하고 담당자에게 확인을 요청하세요.';
+        if (code === 'WB_CLCO_ACCESS_BLOCKED') return '접근 제한입니다. 계정 연결을 다시 확인하고 담당자에게 확인을 요청하세요.';
+        if (['WB_CLCO_COHORT_BUDGET_EXHAUSTED', 'WB_CLCO_LIMIT_REACHED'].includes(code)) return '사용량 또는 이용 한도 문제입니다. 담당자에게 확인을 요청하세요.';
+        if (code === 'WB_CLCO_SESSION_CLOSED') return '이용 시간이 아닙니다. 이용 시간을 확인하세요.';
+        if (['WB_CLCO_TIMEOUT', 'REQUEST_TIMEOUT', 'ENGINE_TIMEOUT', 'TIMEOUT'].includes(code)) return '시간 초과입니다. 잠시 뒤 현재 API 연결 점검 버튼을 직접 눌러 다시 점검하세요.';
+        if (code === 'WB_CLCO_RATE_LIMITED') return '요청 제한입니다. 잠시 뒤 직접 다시 점검하세요.';
+        if (code === 'NETWORK_ERROR') return '네트워크 연결 문제입니다. 잠시 뒤 직접 다시 점검하세요.';
+        if (['WB_CLCO_CANCELLED', 'CANCELLED', 'REQUEST_CANCELLED'].includes(code)) return '취소됨. 이전 결과는 현재 결과가 아닙니다.';
+        if (['ON_AI_MODEL_LIST_EMPTY', 'MODEL_NOT_CONFIGURED'].includes(code)) return '쓸 수 있는 모델이 없습니다. 담당자에게 모델 허용 설정 확인을 요청하세요.';
+        return '확인 불가입니다. 연결 점검이 끝난 것이 아닙니다.';
+      };
+      const manual = (parent) => add(parent, 'p', '다시 점검은 현재 API 연결 점검 버튼을 직접 누르세요. 자동으로 다시 점검하지 않습니다.');
+      const source = input && typeof input === 'object' ? input : { status: 'idle' };
+      const root = document.createElement('div');
+      if (source.status === 'idle') {
+        add(root, 'p', 'AI 연결 점검 전');
+        manual(root);
+        return root;
+      }
+      if (source.status === 'loading') {
+        add(root, 'p', 'AI 연결 점검 중');
+        return root;
+      }
+      if (source.status === 'error') {
+        const code = safeCode(source.error && source.error.code);
+        add(root, 'p', `code: ${code}`);
+        add(root, 'p', guidance(code === '확인 불가' ? '' : code));
+        const message = safeText(source.error && source.error.message);
+        if (message) add(root, 'p', `message: ${message}`);
+        manual(root);
+        return root;
+      }
+      const data = source.data;
+      const checkedAt = safeText(source.checkedAt);
+      if (source.status === 'ok' && data && data.transportChecked === true && (data.audienceAuthorization === 'test' || data.audienceAuthorization === 'verified') && Number.isInteger(data.modelCount) && data.modelCount >= 0 && data.modelCount <= 10000) {
+        add(root, 'p', data.audienceAuthorization === 'test' ? '시험 연결 점검(test)' : '앱 권한 확인 후 점검(verified)');
+        add(root, 'p', `응답 모델 수: ${data.modelCount}`);
+        add(root, 'p', `점검 시각: ${checkedAt || '확인 불가'}`);
+        add(root, 'p', '연결만 점검했습니다. 사건 설명은 아직 실행하지 않았습니다.');
+        return root;
+      }
+      add(root, 'p', '확인 불가입니다. 연결 점검이 끝난 것이 아닙니다.');
+      return root;
+    },
+    renderExplanation(input) {
+      const add = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const secret = /(?:bearer\s+\S+|sk-[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{8,}\.|api[_ -]?key|password|비밀번호|토큰|열쇠)/i;
+      const safeText = (value) => (typeof value === 'string' && value.length > 0 && value.length <= 1500 && !secret.test(value) ? value : '');
+      const safeCode = (value) => (typeof value === 'string' && /^[A-Z0-9_]{1,64}$/.test(value) ? value : '확인 불가');
+      const safeId = (value) => (typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !secret.test(value) ? value : '');
+      const source = input && typeof input === 'object' ? input : {};
+      const explanation = source.explanation && typeof source.explanation === 'object' ? source.explanation : { status: 'idle' };
+      const root = document.createElement('div');
+      const eventId = safeId(source.event && source.event.id);
+      const summary = explanation.status === 'ok' && explanation.data ? safeText(explanation.data.summary) : '';
+      if (explanation.status === 'ok' && eventId && summary) {
+        root.setAttribute('data-student-explanation-event', eventId);
+        add(root, 'p', `사건 ID: ${eventId}`);
+        add(root, 'p', `요약: ${summary}`);
+        return root;
+      }
+      if (explanation.status === 'error') {
+        const code = safeCode(explanation.error && explanation.error.code);
+        add(root, 'p', `code: ${code}`);
+        const message = safeText(explanation.error && explanation.error.message);
+        add(root, 'p', message ? `message: ${message}` : '사건 설명을 표시할 수 없습니다.');
+        add(root, 'p', '기록은 그대로입니다.');
+        return root;
+      }
+      if (explanation.status === 'loading') {
+        add(root, 'p', '사건 설명 요청 중');
+        return root;
+      }
+      add(root, 'p', '사건 설명을 아직 요청하지 않았습니다.');
+      return root;
+    },
     renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
   };
 }
