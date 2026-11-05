@@ -112,7 +112,57 @@ export function createStudentView() {
       }));
       return root;
     },
-    renderDecision() { return '학생 구현 대기: 서버의 판정과 이유를 연결하세요.'; },
+    renderDecision(input) {
+      const add = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const source = input && typeof input === 'object' ? input : { status: 'idle' };
+      const appId = typeof source.appId === 'string' && source.appId.length > 0 ? source.appId : '';
+      const root = document.createElement('div');
+      if (appId) add(root, 'p', `업무 앱: ${appId}`);
+      if (source.status === 'idle') {
+        add(root, 'p', '앱을 골라 접속을 요청하세요.');
+        return root;
+      }
+      if (source.status === 'loading') {
+        add(root, 'p', '판정 확인 중');
+        return root;
+      }
+      if (source.status === 'error') {
+        const message = source.error && typeof source.error.message === 'string' ? source.error.message : '';
+        add(root, 'p', message ? `요청 실패: ${message}` : '요청 실패');
+        add(root, 'p', '거부(deny) 판정이 아닙니다.');
+        return root;
+      }
+      if (source.status !== 'ok' || !source.data || typeof source.data !== 'object') {
+        add(root, 'p', '확인 불가(unknown)');
+        add(root, 'p', '허용되지 않았습니다.');
+        return root;
+      }
+      const data = source.data;
+      const labels = {
+        allow: '허용(allow)',
+        deny: '거부(deny)',
+        challenge: '추가 확인 필요(challenge)',
+        unknown: '확인 불가(unknown)',
+      };
+      const decision = typeof data.decision === 'string' ? data.decision : '';
+      add(root, 'p', Object.hasOwn(labels, decision) ? labels[decision] : '확인 불가(unknown)');
+      if (decision === 'allow') add(root, 'p', '정책상 접근 허용입니다. 실제 앱 접속 성공은 보장하지 않습니다.');
+      else if (decision === 'deny') add(root, 'p', '접근이 거부되었습니다.');
+      else if (decision === 'challenge') add(root, 'p', '이 앱은 추가 확인 절차를 대신 수행하지 않습니다.');
+      else add(root, 'p', '허용되지 않았습니다.');
+      const list = document.createElement('dl');
+      add(list, 'dt', '판정 이유');
+      add(list, 'dd', typeof data.reason === 'string' && data.reason.length > 0 ? data.reason : '확인 불가');
+      add(list, 'dt', '판정 시각');
+      add(list, 'dd', typeof data.checkedAt === 'string' && data.checkedAt.length > 0 ? data.checkedAt : '확인 불가');
+      root.append(list);
+      return root;
+    },
     renderEvents() { return '학생 구현 대기: 본인 접속·XDR 기록을 연결하세요.'; },
     renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
