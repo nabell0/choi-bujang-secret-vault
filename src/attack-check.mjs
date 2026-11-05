@@ -1,7 +1,7 @@
 ﻿// The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 export async function runAttackChecks(config) {
-  if (![1, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -20,7 +20,7 @@ export async function runAttackChecks(config) {
   if (config.step === 8) return runStep8Checks(app, config);
   if (config.step === 9) return runStep9Checks(app, config);
   if (config.step === 10) return runStep10Checks(app, config);
-  if (config.step === 11) return runStep11Checks(app, config);
+  if (config.step === 11 || config.step === 12) return runStep11Checks(app, config);
   if (typeof config.sampleMarker !== 'string' || !config.sampleMarker) throw new Error('가상 메모의 확인 표시를 넣어 주세요.');
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),

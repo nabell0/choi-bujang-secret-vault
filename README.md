@@ -267,6 +267,50 @@ npm run bundle
 
 **남은 약점:** 서버 함수가 12개로 Vercel Hobby 한도에 닿았습니다. 시험·심판 계정도 승인된 기기 없이는 보호 자료 API에서 403을 받습니다. 반 엔진 쪽의 설치형 앱 서명 검증은 계약에 없어 이 저장소가 다루지 않습니다. 일회용 값(nonce)은 기록하지 않으므로 같은 요청을 60초 안에 다시 보내는 것은 막지 못합니다. 패스키 제조사 증명(attestation)은 확인하지 않습니다. 오프라인 안내는 화면을 연 뒤 연결이 끊긴 경우에만 보입니다.
 
+## 12단계: 탈환 작전실과 설치·실행·중지·복구
+
+11단계 마지막 커밋은 `bd0958c`(2026-10-14)입니다. 아래 안내는 그 커밋의 판정기·탐지·접속 앱·자료실에 작전실 화면과 단계 12를 더한 12단계 저장점 기준입니다. 위 10단계 점검 기록의 `step` 10·커밋 `c039e3d`는 그때의 기록이고, 지금 설정의 `step`은 12입니다.
+
+### 출처
+
+- **ALEPH SDP 엔진 사용:** 운영 반 엔진이 신원, 기기, 경로를 확인한 뒤 `aleph.decision.v1` 요청을 학생 판정기에 넘깁니다. 회수 제안의 집행, 실제 접속 차단, 심판 판정도 엔진 몫입니다. 이 저장소에는 엔진 코드가 없습니다.
+- **학생 몫:** `src/decider.mjs`(규칙 판정), `src/detect.mjs`(조회 폭주 제안), 자료실 API(`api/notes`, `api/notices`, `api/materials`, `api/restore`, `api/device`), 설치형 웹앱(`public/index.html`, `public/manifest.webmanifest`), 작전실(`public/ops.html`, `src/ops-room.mjs`, `src/ops-procedure.mjs`)입니다. 학생 판정기가 `allow`를 내도 엔진의 앞선 검사를 되돌리지 못합니다.
+
+### 설치
+
+Node.js 22 이상이 필요합니다. 저장소를 받은 뒤 의존성은 아래만 설치합니다. `package.json`에 고정된 `@supabase/supabase-js@2.117.2`와 `jose@6.2.12`입니다.
+
+```powershell
+npm install
+```
+
+비밀값은 저장소에 없습니다. Vercel **Settings → Environment Variables**에 학생이 직접 넣는 이름은 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `INSTRUCTOR_USER_IDS`입니다. 값은 이 문서나 코드에 적지 않습니다. 학습 DB 테이블은 Supabase SQL Editor에서 `supabase/step3-notes-crud.sql`부터 `step11-devices.sql`까지 단계 순서로 한 번씩 실행합니다.
+
+### 실행
+
+```powershell
+npm run build -- --local
+npm run decider:test
+npm run detect:test
+npm run device:check
+```
+
+`npm run build -- --local`은 공개 `data.json`을 만들지 않고 `public/ops-room.json`과 `public/ops-procedure.mjs`를 만듭니다. 배포 빌드(Vercel의 `npm run build`)는 같은 `aleph.config.json`의 `step`을 `public/aleph.json`에 넣습니다. 지금 그 값은 12입니다. `--local`은 배포 식별이 없어 `aleph.json`을 쓰지 않습니다.
+
+자료실 화면은 배포 주소의 `/`입니다. 탈환 작전실은 `/ops.html`이고, **총공세 기록**을 누르면 1~11단계 표가 채워집니다. 응답이 온 행만 허용 또는 거부이고, 로그인 토큰이나 승인 기기가 필요한 행은 미실행입니다. 로컬 연습 명령은 가상 요청이며 엔진 판정이 아닙니다.
+
+### 중지
+
+이 저장소는 백그라운드 서버를 설치하지 않습니다. 브라우저를 닫으면 메모리에만 있던 로그인과 기기 확인이 사라집니다. 로컬에서 정적 서버를 띄웠다면 그 터미널에서 Ctrl+C로 멈춥니다. 배포를 내리는 일은 Vercel 프로젝트에서 하며, 이 저장소의 npm 명령이 아닙니다. 승인된 기기를 멈추려면 Supabase SQL Editor에서 `supabase/step11-devices.sql`의 [회수] 문을 실행합니다. 화면의 중지 단추는 없습니다.
+
+### 복구
+
+- **정책:** `npm run policy:diff`로 안전 사본(revision 9)과 차이를 본 뒤, `npm run policy:restore -- --service notes --confirm`처럼 서비스 하나만 되돌립니다. 다른 서비스와 이전 감사 이력은 유지됩니다.
+- **메모:** 로그인과 승인된 기기 서명이 있는 `POST /api/restore/notes/:id`만 사본을 되돌립니다. 토큰이 없으면 401이고, 메모 본문은 작전실 표에 나오지 않습니다.
+- **기기:** 회수 뒤 다시 쓰려면 SQL Editor의 [승인] 문을 다시 실행하고, 화면에서 **승인 상태 확인**을 누릅니다. 승인 단추만으로는 복구되지 않습니다.
+
+2026-11-05 확인: `aleph.config.json`의 `step`은 12이고, 배포 식별 함수는 이 값을 `aleph.json`에 넣으며 13은 거부합니다. `npm run build -- --local`은 배포 식별이 없어 `aleph.json`을 쓰지 않습니다. `npm run decider:test`는 통과 6줄이었습니다. `role`·`identity`·`device`·`geo`를 붙인 가상 요청은 그 값과 관계없이 같은 `starter.deny`였고, 응답의 `ruleIds`는 모두 `RULE_IDS` 안에 있었습니다. `package.json`과 `package-lock.json`만 빈 폴더에 복사해 `npm install`을 실행했을 때 오류 없이 끝났고 취약점 경고는 0건이었습니다. 이 확인은 로컬 연습이며 엔진 판정이 아닙니다.
+
 ## 가상 메모 노출 확인 절차
 
 검색어는 메모 본문·제목 일부입니다. `[가]`처럼 한 글자를 괄호로 감싼 정규식을 써서 이 README 자체는 검색에 걸리지 않게 합니다. Windows의 Git 기본 정규식은 이런 한글 괄호식을 놓치므로 `git grep`에는 반드시 `-P`를 붙이세요. 화면 확인 때는 `supabase/*.local.sql`의 `content` 값을 그대로 검색하세요.

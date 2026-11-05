@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deploymentIdentity } from './deployment-identity.mjs';
+import { buildOpsRecord } from '../src/ops-room.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const config = JSON.parse(await readFile(resolve(root, 'aleph.config.json'), 'utf8'));
@@ -11,6 +12,11 @@ await mkdir(resolve(root, 'public'), { recursive: true });
 // Never clear public/ as a whole: it holds index.html and aleph.json.
 await rm(resolve(root, 'public', 'data.json'), { force: true });
 console.log('공개 data.json을 만들지 않습니다. 메모는 Supabase notes 테이블에 있습니다.');
+const opsRecord = await buildOpsRecord();
+await writeFile(resolve(root, 'public', 'ops-room.json'), `${JSON.stringify(opsRecord, null, 2)}\n`, 'utf8');
+await writeFile(resolve(root, 'public', 'ops-procedure.mjs'),
+  await readFile(resolve(root, 'src', 'ops-procedure.mjs'), 'utf8'), 'utf8');
+console.log('탈환 작전실 기록 public/ops-room.json을 만들었습니다. 메모 본문은 넣지 않습니다.');
 const allowedRoutes = config.allowedRoutes;
 if (config.step >= 3 && (!Array.isArray(allowedRoutes) || !allowedRoutes.length
     || allowedRoutes.some(route => typeof route !== 'string' || !/^(GET|POST|PUT|PATCH|DELETE) \/api\/\S+$/u.test(route)))) {

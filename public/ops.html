@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BYTE BACK | 탈환 작전실</title>
+  <meta name="theme-color" content="#101a28">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
+    main { max-width: 880px; margin: 0 auto; padding: 44px 22px 64px; }
+    a { color: #8ad8df; }
+    h1 { margin: 12px 0; font-size: clamp(30px, 6vw, 44px); }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    p { color: #bfd0e5; line-height: 1.6; }
+    section { margin: 18px 0; padding: 16px 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+    dt { color: #8ad8df; font-weight: 700; }
+    dd { margin: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #51667c; vertical-align: top; }
+    th { color: #8ad8df; font-size: 14px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+    .recorded { background: #1d4d46; color: #b7f3e4; }
+    .untested { background: #5a451c; color: #ffefcf; }
+    .confirmed { background: #1d3d5a; color: #d3ecff; }
+    .allow { background: #1d4d46; color: #b7f3e4; }
+    .deny { background: #612a35; color: #ffe3e8; }
+    .match { margin-top: 8px; font-weight: 700; }
+    #ops-server-record, #ops-measured-log { display: none; }
+    .table-wrap { overflow-x: auto; }
+    button.run { margin-top: 8px; padding: 8px 14px; border: 0; border-radius: 10px; background: #8ad8df; color: #101a28; font-weight: 700; cursor: pointer; }
+    button.run:disabled { opacity: .6; cursor: wait; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="/">자료실로 돌아가기</a></p>
+    <h1>탈환 작전실</h1>
+    <p>판정기 규칙, 탐지 사건, 회수 상태, 복구 버전의 수치입니다. 서버 기록에서 온 숫자와, 이 화면이 방금 받은 API 응답을 따로 보여 줍니다. 호출하지 않은 항목은 미실행입니다. 메모 본문은 표시하지 않습니다.</p>
+    <p id="match" class="match" role="status">서버 기록을 불러오는 중입니다.</p>
+
+    <section aria-labelledby="decider-title">
+      <h2 id="decider-title">판정기 규칙</h2>
+      <dl>
+        <dt>규칙 수</dt><dd id="rule-count"></dd>
+        <dt>상태</dt><dd><span class="tag recorded">서버 기록</span></dd>
+        <dt>배포에서 decide()를 호출한 횟수</dt><dd id="decide-calls"></dd>
+      </dl>
+      <ul id="rule-list"></ul>
+    </section>
+
+    <section aria-labelledby="detect-title">
+      <h2 id="detect-title">탐지 사건</h2>
+      <dl>
+        <dt>기록된 운영 사건</dt><dd id="detect-events"></dd>
+        <dt>묶는 시간</dt><dd id="detect-window"></dd>
+        <dt>회수 제안 기준</dt><dd id="detect-burst"></dd>
+        <dt>제안 동작</dt><dd id="detect-action"></dd>
+        <dt>제안 이유</dt><dd id="detect-reason"></dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="recovery-title">
+      <h2 id="recovery-title">회수 상태</h2>
+      <dl>
+        <dt>집행된 회수</dt><dd id="recovery-count"></dd>
+        <dt>제안 이유</dt><dd id="recovery-reason"></dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="restore-title">
+      <h2 id="restore-title">복구 버전</h2>
+      <dl>
+        <dt>시험 정책 revision</dt><dd id="policy-revision"></dd>
+        <dt>안전 사본 revision</dt><dd id="safe-revision"></dd>
+        <dt>감사 이력</dt><dd id="audit-count"></dd>
+        <dt>정책 복원</dt><dd id="restored-count"></dd>
+        <dt>메모 사본 행</dt><dd id="backup-rows"></dd>
+      </dl>
+      <table>
+        <thead><tr><th>동작</th><th>서비스</th><th>revision</th><th>상태</th></tr></thead>
+        <tbody id="audit-rows"></tbody>
+      </table>
+    </section>
+
+    <section aria-labelledby="api-title">
+      <h2 id="api-title">API 응답 확인</h2>
+      <dl>
+        <dt>계획된 호출</dt><dd id="probe-count"></dd>
+        <dt>아직 호출하지 않은 항목</dt><dd id="untested-count"></dd>
+        <dt>이 화면이 응답을 받은 호출</dt><dd id="live-count">미실행</dd>
+      </dl>
+      <table>
+        <thead><tr><th>호출</th><th>서버 기록</th><th>이 화면의 API 응답</th></tr></thead>
+        <tbody id="probe-rows"></tbody>
+      </table>
+    </section>
+
+    <section aria-labelledby="procedure-title">
+      <h2 id="procedure-title">1~11단계 확인 절차</h2>
+      <p>총공세는 무인증 조회, 타인 메모 조회, 복구, 서명 없는 수정을 순서대로 보내고 각 요청을 따로 기록합니다. 응답을 받은 행만 허용 또는 거부입니다. 보내지 않은 시험은 미실행이며, 통과로 채우지 않습니다.</p>
+      <p id="procedure-summary" class="match">절차를 아직 실행하지 않았습니다.</p>
+      <button id="assault-button" class="run" type="button">총공세 기록</button>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>단계</th><th>구분</th><th>기대 결과</th><th>실제 API 결과</th><th>판정</th><th>요청 ID</th><th>확인 시각</th>
+            </tr>
+          </thead>
+          <tbody id="procedure-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script type="application/json" id="ops-server-record"></script>
+  <script type="application/json" id="ops-measured-log"></script>
+  <script type="module">
+    import { PROCEDURE, runProcedure, formatActual, tally } from '/ops-procedure.mjs';
+    const VERDICT = { allow: '허용', deny: '거부', untested: '미실행' };
+    const ROLE = { allow: '정상 요청', deny: '금지 요청' };
+    const STATUS = { recorded: '서버 기록', untested: '미실행', confirmed: 'API 응답에서 확인' };
+    const read = (record, path) => path.split('.').reduce((value, key) => value?.[key], record);
+    const tag = status => {
+      const span = document.createElement('span');
+      span.className = `tag ${status === 'confirmed' ? 'confirmed' : status === 'recorded' ? 'recorded' : 'untested'}`;
+      span.textContent = STATUS[status] ?? STATUS.untested;
+      return span;
+    };
+    const put = (id, path, text) => {
+      const node = document.getElementById(id);
+      node.textContent = text;
+      if (path) node.dataset.record = path;
+    };
+    const untestedText = () => '미실행';
+
+    function render(record) {
+      put('rule-count', 'counts.rules', String(record.counts.rules));
+      put('decide-calls', 'decider.liveDecideCalls.status', untestedText());
+      put('detect-events', 'detect.recordedEvents.status', untestedText());
+      put('detect-window', 'detect.windowMinutes', `${record.detect.windowMinutes}분`);
+      put('detect-burst', 'detect.burstLimit', `${record.detect.burstLimit}건을 넘을 때만`);
+      put('detect-action', 'detect.proposalAction', record.detect.proposalAction);
+      put('detect-reason', 'detect.proposalReasonCode', record.detect.proposalReasonCode);
+      put('recovery-count', 'recovery.enforced.status', untestedText());
+      put('recovery-reason', 'recovery.proposalReasonCode', record.recovery.proposalReasonCode);
+      put('policy-revision', 'restore.policyRevision', String(record.restore.policyRevision));
+      put('safe-revision', 'restore.safeRevision', String(record.restore.safeRevision));
+      put('audit-count', 'counts.audit', `${record.counts.audit}줄`);
+      put('restored-count', 'counts.policyRestored', `${record.counts.policyRestored}줄`);
+      put('backup-rows', 'restore.noteBackupRows.status', untestedText());
+      put('probe-count', 'counts.apiProbes', `${record.counts.apiProbes}개`);
+      put('untested-count', 'counts.untested', `${record.counts.untested}개`);
+
+      const rules = document.getElementById('rule-list');
+      rules.replaceChildren(...record.decider.rules.map(rule => {
+        const item = document.createElement('li');
+        item.textContent = rule.id;
+        item.dataset.rule = rule.id;
+        return item;
+      }));
+      const audit = document.getElementById('audit-rows');
+      audit.replaceChildren(...record.restore.audit.map(row => {
+        const tr = document.createElement('tr');
+        const revision = [row.fromRevision, row.toRevision].filter(value => Number.isInteger(value)).join(' → ');
+        [row.action, row.service, revision || '—'].forEach(value => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          tr.append(cell);
+        });
+        const state = document.createElement('td');
+        state.append(tag('recorded'));
+        tr.append(state);
+        return tr;
+      }));
+      const probes = document.getElementById('probe-rows');
+      probes.replaceChildren(...record.apiProbes.map(probe => {
+        const tr = document.createElement('tr');
+        const call = document.createElement('td');
+        call.textContent = `${probe.method} ${probe.path}`;
+        const recorded = document.createElement('td');
+        recorded.append(tag(probe.status));
+        const live = document.createElement('td');
+        live.id = `live-${probe.id}`;
+        live.textContent = '미실행';
+        tr.append(call, recorded, live);
+        return tr;
+      }));
+      document.getElementById('ops-server-record').textContent = JSON.stringify(record);
+    }
+
+    function matches(record) {
+      const hidden = JSON.parse(document.getElementById('ops-server-record').textContent);
+      const shown = text => ({
+        'counts.rules': String(hidden.counts.rules),
+        'detect.windowMinutes': `${hidden.detect.windowMinutes}분`,
+        'detect.burstLimit': `${hidden.detect.burstLimit}건을 넘을 때만`,
+        'detect.proposalAction': hidden.detect.proposalAction,
+        'detect.proposalReasonCode': hidden.detect.proposalReasonCode,
+        'recovery.proposalReasonCode': hidden.recovery.proposalReasonCode,
+        'restore.policyRevision': String(hidden.restore.policyRevision),
+        'restore.safeRevision': String(hidden.restore.safeRevision),
+        'counts.audit': `${hidden.counts.audit}줄`,
+        'counts.policyRestored': `${hidden.counts.policyRestored}줄`,
+        'counts.apiProbes': `${hidden.counts.apiProbes}개`,
+        'counts.untested': `${hidden.counts.untested}개`,
+      });
+      const fields = shown();
+      const bad = [...document.querySelectorAll('[data-record]')].filter(node => {
+        const key = node.dataset.record;
+        if (key.endsWith('.status')) return read(hidden, key) !== 'untested' || node.textContent !== '미실행';
+        return node.textContent !== fields[key];
+      });
+      const ruleNames = [...document.querySelectorAll('[data-rule]')].map(node => node.dataset.rule);
+      const auditRows = document.querySelectorAll('#audit-rows tr').length;
+      return bad.length === 0
+        && ruleNames.join() === hidden.decider.rules.map(rule => rule.id).join()
+        && ruleNames.length === hidden.counts.rules
+        && hidden.counts.rules === hidden.decider.ruleCount
+        && auditRows === hidden.counts.audit
+        && hidden.counts.audit === hidden.restore.audit.length
+        && hidden.counts.policyRestored === hidden.restore.audit.filter(row => row.action === 'policy_restored').length
+        && hidden.counts.apiProbes === hidden.apiProbes.length
+        && JSON.stringify(hidden.counts) === JSON.stringify(record.counts);
+    }
+
+    const errorCode = text => {
+      try {
+        const parsed = JSON.parse(text);
+        return typeof parsed.error === 'string' && /^[A-Z0-9_]{1,64}$/u.test(parsed.error) ? parsed.error : null;
+      } catch {
+        return null;
+      }
+    };
+
+    async function probeAll(record) {
+      let confirmed = 0;
+      await Promise.all(record.apiProbes.map(async probe => {
+        const cell = document.getElementById(`live-${probe.id}`);
+        try {
+          const response = await fetch(probe.path, { method: probe.method, cache: 'no-store' });
+          const code = errorCode(await response.text());
+          if (!code) {
+            cell.textContent = '미실행';
+            return;
+          }
+          cell.replaceChildren(tag('confirmed'), document.createTextNode(` HTTP ${response.status} ${code}`));
+          confirmed += 1;
+        } catch {
+          cell.textContent = '미실행';
+        }
+      }));
+      const live = document.getElementById('live-count');
+      if (confirmed === 0) live.textContent = '미실행';
+      else if (confirmed === record.apiProbes.length) live.textContent = `${confirmed}개`;
+      else live.textContent = `미실행 ${record.apiProbes.length - confirmed}개 · API 응답에서 확인 ${confirmed}개`;
+    }
+
+    const response = await fetch('/ops-room.json', { cache: 'no-store' });
+    if (!response.ok) {
+      document.getElementById('match').textContent = '서버 기록을 받지 못했습니다. 수치는 표시하지 않습니다.';
+    } else {
+      const record = await response.json();
+      render(record);
+      const matched = matches(record);
+      document.getElementById('match').textContent = matched
+        ? `서버 기록과 화면 수치 일치 (${document.querySelectorAll('[data-record]').length}칸)`
+        : '서버 기록과 화면 수치가 다릅니다.';
+      if (matched) await probeAll(record);
+    }
+
+    const blankRows = () => PROCEDURE.map(item => ({
+      id: item.id, step: item.step, role: item.role, label: item.label, expected: item.expected,
+      verdict: 'untested', httpStatus: null, error: null, noteCount: null, nosniff: null,
+      requestId: null, checkedAt: null,
+    }));
+
+    function renderProcedure(rows) {
+      const body = document.getElementById('procedure-rows');
+      body.replaceChildren(...rows.map(row => {
+        const tr = document.createElement('tr');
+        const verdict = document.createElement('td');
+        const mark = document.createElement('span');
+        mark.className = `tag ${row.verdict === 'allow' ? 'allow' : row.verdict === 'deny' ? 'deny' : 'untested'}`;
+        mark.dataset.verdict = row.verdict;
+        mark.textContent = VERDICT[row.verdict] ?? VERDICT.untested;
+        verdict.append(mark);
+        const request = document.createElement('td');
+        request.id = `req-${row.id}`;
+        request.textContent = row.requestId ?? '';
+        const when = document.createElement('td');
+        when.id = `at-${row.id}`;
+        when.textContent = row.checkedAt ?? '';
+        [String(row.step), ROLE[row.role] ?? '', `${row.label}: ${row.expected}`, formatActual(row)].forEach(value => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          tr.append(cell);
+        });
+        tr.append(verdict, request, when);
+        return tr;
+      }));
+      document.getElementById('ops-measured-log').textContent = JSON.stringify(rows);
+      const counts = tally(rows);
+      const shown = {
+        allow: body.querySelectorAll('[data-verdict="allow"]').length,
+        deny: body.querySelectorAll('[data-verdict="deny"]').length,
+        untested: body.querySelectorAll('[data-verdict="untested"]').length,
+      };
+      const hidden = JSON.parse(document.getElementById('ops-measured-log').textContent);
+      const sameIds = hidden.every(row => (document.getElementById(`req-${row.id}`)?.textContent ?? '') === (row.requestId ?? '')
+        && (document.getElementById(`at-${row.id}`)?.textContent ?? '') === (row.checkedAt ?? ''));
+      const same = counts.allow === shown.allow && counts.deny === shown.deny && counts.untested === shown.untested
+        && tally(hidden).allow === counts.allow && tally(hidden).deny === counts.deny && sameIds;
+      const summary = document.getElementById('procedure-summary');
+      summary.textContent = same
+        ? `실측 허용 ${counts.allow} · 실측 거부 ${counts.deny} · 미실행 ${counts.untested} · 표와 기록 일치`
+        : '표와 기록이 다릅니다.';
+    }
+
+    async function executeProcedure() {
+      const button = document.getElementById('assault-button');
+      button.disabled = true;
+      try {
+        renderProcedure(await runProcedure(location.origin));
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    renderProcedure(blankRows());
+    document.getElementById('assault-button').addEventListener('click', () => { executeProcedure(); });
+    await executeProcedure();
+  </script>
+</body>
+</html>
