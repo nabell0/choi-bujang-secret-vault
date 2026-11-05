@@ -524,28 +524,82 @@ export function createStudentView({ onChange } = {}) {
       const safeId = (value) => (typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !secret.test(value) ? value : '');
       const source = input && typeof input === 'object' ? input : {};
       const explanation = source.explanation && typeof source.explanation === 'object' ? source.explanation : { status: 'idle' };
+      const event = source.event && typeof source.event === 'object' ? source.event : null;
       const root = document.createElement('div');
-      const eventId = safeId(source.event && source.event.id);
-      const summary = explanation.status === 'ok' && explanation.data ? safeText(explanation.data.summary) : '';
-      if (explanation.status === 'ok' && eventId && summary) {
-        root.setAttribute('data-student-explanation-event', eventId);
-        add(root, 'p', `사건 ID: ${eventId}`);
-        add(root, 'p', `요약: ${summary}`);
+      const show = (lines) => {
+        for (const line of lines) add(root, 'p', line);
         return root;
-      }
+      };
       if (explanation.status === 'error') {
         const code = safeCode(explanation.error && explanation.error.code);
-        add(root, 'p', `code: ${code}`);
         const message = safeText(explanation.error && explanation.error.message);
-        add(root, 'p', message ? `message: ${message}` : '사건 설명을 표시할 수 없습니다.');
-        add(root, 'p', '기록은 그대로입니다.');
-        return root;
+        const lines = [`AI 설명 실패: ${message || '확인할 수 없습니다.'}`, `code: ${code}`];
+        if (code === 'ON_AI_INVALID_INPUT') lines.push('근거 부족 또는 입력 오류라 이 설명을 쓸 수 없습니다.');
+        else if (code === 'ON_AI_INVALID_OUTPUT') lines.push('근거가 맞지 않거나 비밀 표기가 있거나 이미 실행됐다고 답해 이 설명을 쓸 수 없습니다.');
+        else lines.push('이 설명을 쓸 수 없습니다.');
+        lines.push('기록은 그대로입니다. 과제 실패가 아닙니다.');
+        return show(lines);
       }
-      if (explanation.status === 'loading') {
-        add(root, 'p', '사건 설명 요청 중');
-        return root;
+      if (!event) return show(['보안 기록에서 기록을 먼저 고르세요.']);
+      if (explanation.status === 'loading') return show(['설명 요청 중']);
+      if (explanation.status !== 'ok' || !explanation.data || typeof explanation.data !== 'object') return show(['사건 설명을 아직 요청하지 않았습니다.']);
+      const data = explanation.data;
+      const eventId = safeId(event.id);
+      const summary = safeText(data.summary);
+      if (data.executed === true || (Array.isArray(data.proposals) && data.proposals.some((item) => item && item.executed === true))) {
+        return show(['AI가 이미 실행했다고 답한 설명은 쓸 수 없습니다.', '기록은 그대로입니다.']);
       }
-      add(root, 'p', '사건 설명을 아직 요청하지 않았습니다.');
+      if (!eventId || !summary) return show(['이 설명을 쓸 수 없습니다.', '기록은 그대로입니다.']);
+      const evidenceText = new Map();
+      let evidenceRejected = !Array.isArray(event.evidence);
+      for (const item of evidenceRejected ? [] : event.evidence) {
+        const id = safeId(item && item.id);
+        const text = item && typeof item.text === 'string' ? item.text : '';
+        if (!id || !text || secret.test(text)) evidenceRejected = true;
+        else if (evidenceText.has(id)) evidenceRejected = true;
+        else evidenceText.set(id, text);
+      }
+      const cited = Array.isArray(data.evidenceIds) ? data.evidenceIds.map(safeId) : null;
+      const citedOk = cited && cited.length > 0 && cited.length === evidenceText.size && cited.every((id) => id && evidenceText.has(id)) && new Set(cited).size === cited.length;
+      if (evidenceRejected || !citedOk) {
+        const reason = !Array.isArray(event.evidence) || event.evidence.length === 0 ? '근거 부족 또는 입력 오류라 이 설명을 쓸 수 없습니다.' : '이 설명을 쓸 수 없습니다. 근거가 맞지 않습니다.';
+        return show([reason, '기록은 그대로입니다.']);
+      }
+      const ruleLines = [];
+      if (!Array.isArray(event.rules)) return show(['이 설명을 쓸 수 없습니다. 규칙을 확인할 수 없습니다.', '기록은 그대로입니다.']);
+      for (const item of event.rules) {
+        const id = safeId(item && item.id);
+        const text = item && typeof item.text === 'string' && !secret.test(item.text) ? item.text : '';
+        if (!id || !text) return show(['이 설명을 쓸 수 없습니다. 규칙을 확인할 수 없습니다.', '기록은 그대로입니다.']);
+        ruleLines.push(`규칙 ${id} — ${text}`);
+      }
+      const state = event.state && typeof event.state === 'object' ? event.state : null;
+      if (!state) return show(['이 설명을 쓸 수 없습니다. 현재 상태를 확인할 수 없습니다.', '기록은 그대로입니다.']);
+      const unknownLines = [];
+      if (state.access === 'unknown') unknownLines.push('접속: 확인 불가(unknown)');
+      if (state.session === 'unknown') unknownLines.push('세션: 확인 불가(unknown)');
+      if (state.device === 'unknown') unknownLines.push('기기: 확인 불가(unknown)');
+      root.setAttribute('data-student-explanation-event', eventId);
+      add(root, 'p', `사건 ID: ${eventId}`);
+      add(root, 'h3', 'AI 설명(참고용)');
+      add(root, 'p', summary);
+      for (const id of cited) add(root, 'p', `근거 ${id} — ${evidenceText.get(id)}`);
+      if (ruleLines.length === 0) add(root, 'p', '규칙 없음');
+      for (const line of ruleLines) add(root, 'p', line);
+      add(root, 'h3', '확인 불가 상태');
+      if (unknownLines.length === 0) add(root, 'p', '없음');
+      else for (const line of unknownLines) add(root, 'p', line);
+      add(root, 'h3', '조치 제안');
+      const proposals = Array.isArray(data.proposals) ? data.proposals : [];
+      const supported = Array.isArray(event.supportedActions) ? event.supportedActions : [];
+      if (proposals.length === 0) {
+        add(root, 'p', supported.length === 0 ? '연동 시스템이 지원하는 조치가 없어 제안이 없습니다(정상).' : 'AI가 제안한 조치가 없습니다.');
+      } else {
+        for (const proposal of proposals) {
+          add(root, 'p', `${safeId(proposal && proposal.action) || '확인 불가'} — ${safeText(proposal && proposal.reason) || '확인 불가'}`);
+          add(root, 'p', '사람 확인이 필요하며 실행되지 않았습니다.');
+        }
+      }
       return root;
     },
     renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
