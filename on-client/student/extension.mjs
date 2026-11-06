@@ -385,6 +385,14 @@ export function createStudentView({ onChange } = {}) {
       } else add(devicesBox, 'p', '확인 불가');
       root.append(devicesBox);
 
+      const resources = document.createElement('section');
+      add(resources, 'h3', '자원 사용량');
+      add(resources, 'p', '제공된 내 기기 응답에는 CPU 사용률, 메모리 사용량, 디스크 남은 공간이 없습니다. 예시 숫자는 표시하지 않습니다.');
+      add(resources, 'p', 'CPU 사용률: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      add(resources, 'p', '메모리 사용량: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      add(resources, 'p', '디스크 남은 공간: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      root.append(resources);
+
       const sessionsBox = document.createElement('section');
       add(sessionsBox, 'h3', '세션');
       add(sessionsBox, 'p', '세션은 지금 검증된 연결 하나만 표시합니다. 지난 세션 목록이 아닙니다.');
