@@ -116,14 +116,14 @@ flowchart LR
 
 | 함수 | 보여주는 것 |
 |---|---|
-| `renderIdentity` | 현재 계정·기기·세션과 `compliant`·`noncompliant`·`unknown` 같은 상태 값 |
-| `renderDecision` | 업무 앱 접속 판정 `allow`·`deny`·`challenge`·`unknown`과 요청 실패 |
-| `renderEvents` | 보안 기록을 거르고, 고른 기록의 근거·규칙·상태를 표시. 미지원 조치는 요청을 보내지 않음 |
-| `renderStatus` | 기기·세션 알림과 비밀이 없는 도움정보 |
+| `renderIdentity` | 현재 계정·기기·세션과 상태 값. `mode`가 `demo`이면 이름·ID를 예시 값으로 적고, 이 PC의 측정 계정이 아니라고 적음 |
+| `renderDecision` | 업무 앱 접속 판정 `allow`·`deny`·`challenge`·`unknown`과 요청 실패. `demo` 판정은 예시 값, `checkedAt`은 이번 응답 시각 |
+| `renderEvents` | 보안 기록을 거르고 상세를 표시. `demo` 기록은 예시 값이며 이 PC의 실제 보안 기록이 아님 |
+| `renderStatus` | 기기·세션 알림과 비밀이 없는 도움정보. `demo` 기기·세션은 예시 값 |
 | `renderAiConnection` | AI 연결 점검 전·점검 중·실패·점검 결과. 사건 설명 실행과 구분 |
 | `renderExplanation` | 선택 기록의 근거·규칙·`unknown` 상태·조치 제안. 제안은 실행이 아님 |
 | `renderAction` | `idle`부터 `succeeded`까지 조치 상태. 접수 응답은 효과 확인이 아님 |
-| `renderVulnerabilities` | 패키지 조회 `idle`·`loading`·`error`·`ok`와 OSV 조회 상태 |
+| `renderVulnerabilities` | 패키지 조회 상태. `checkedAt`은 이번 응답 시각이고, `not_configured`는 조회 완료가 아님. 패키지 예시를 만들지 않음 |
 
 제공 화면의 버튼 이름은 그대로입니다. 예: `다시 불러오기`, `설치 패키지 조회`, `패키지 조회 취소`, `AI 설명 요청`, `대상과 조치를 확인했으며 집행합니다`, `원천 결과만 재조회`, `조치 화면 취소`.
 
@@ -179,3 +179,17 @@ flowchart LR
 - OSV `complete`·`partial`·`not_checked`의 실제 화면. `on-client`에는 `package-lock.json`이 없고, 예제 조회는 `not_configured`
 - 패키지 조회 취소와 오류 뒤 재조회의 네트워크 요청
 - 21·22단계 원문 제출과 판정 통과
+
+## 9. 예시 값과 이번 PC에서 받은 값
+
+2026-11-06에 원래 폴더 `on-client`의 기존 예제 서버 `http://127.0.0.1:5189/`를 다시 열었습니다. 그 프로세스는 `2026-11-06T05:13:37.862Z`부터 `npm run demo`로 켜져 있었고, 이번 확인에서 HTTP 200이었습니다. 서버를 새로 켜거나 종료하지 않았습니다. 복제 폴더의 5190 서버는 이번 확인 대상이 아닙니다.
+
+| 화면 값 | 구분 | 이번 화면에서 본 내용 |
+|---|---|---|
+| `practice-user`, `practice-pc`, `practice-session`, `event-01`, `2026-10-12T03:00:00.000Z` | 예시 값 | 학생 칸에 예시 값이라는 문장이 함께 보임 |
+| 판정 `거부(deny)`, 이유 `기기 상태를 먼저 확인해야 합니다.` | 예시 값 | `개발 저장소 접속 요청` 한 건. 학생 칸에 실제 접근 제어 서버의 판정이 아니라고 보임 |
+| 판정 시각 `2026-11-06T06:15:13.290Z` | 이번 응답에서 받은 값 | 학생 칸에 그 문장이 보임 |
+| `조회 준비 미완료(not_configured)`, `checkedAt: 2026-11-06T06:14:49.464Z` | 상태 문구와 이번 응답 시각 | 패키지 행은 없음. `checkedAt`은 취약점 조회 완료가 아님 |
+| 조회 전의 `조회 전` | 아직 요청 전 | 이 상태의 입력에는 `mode`가 없어 예시 문장을 붙이지 않음 |
+
+`AI 연결 점검`, `AI 설명 요청`, 조치 집행, `npm start`, `start-alekov.ps1`은 이번에도 실행하지 않았습니다.

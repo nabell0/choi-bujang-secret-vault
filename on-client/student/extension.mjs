@@ -55,6 +55,14 @@ export function createStudentView({ onChange } = {}) {
         }
         if (current.status === 'ok') {
           fillOk(box, current.data);
+          if (current.mode === 'demo') {
+            const sourceLabel = title === '기기'
+              ? '위에 표시한 이름과 ID는 예시 값입니다. 이 PC에서 측정한 기기가 아닙니다.'
+              : title === '세션'
+                ? '위에 표시한 ID는 예시 값입니다. 이 PC에서 측정한 연결이 아닙니다.'
+                : '위에 표시한 이름과 ID는 예시 값입니다. 이 PC에서 측정한 계정이 아닙니다.';
+            add(box, 'p', sourceLabel);
+          }
           return box;
         }
         add(box, 'p', '확인 불가');
@@ -164,6 +172,8 @@ export function createStudentView({ onChange } = {}) {
       add(list, 'dt', '판정 시각');
       add(list, 'dd', typeof data.checkedAt === 'string' && data.checkedAt.length > 0 ? data.checkedAt : '확인 불가');
       root.append(list);
+      if (source.mode === 'demo') add(root, 'p', '업무 앱, 판정, 판정 이유는 예시 값입니다. 실제 접근 제어 서버의 판정이 아닙니다.');
+      if (typeof data.checkedAt === 'string' && data.checkedAt.length > 0) add(root, 'p', '판정 시각은 이번 응답에서 받은 값입니다.');
       return root;
     },
     renderEvents(input) {
@@ -222,6 +232,7 @@ export function createStudentView({ onChange } = {}) {
         add(root, 'p', '확인 불가');
         return root;
       }
+      if (source.mode === 'demo') add(root, 'p', '기록 ID, 시각, 앱, 요약, 근거, 규칙은 예시 값입니다. 이 PC의 실제 보안 기록이 아닙니다.');
       const events = source.data.slice().sort((left, right) => {
         const leftAt = Date.parse(left && left.at);
         const rightAt = Date.parse(right && right.at);
@@ -370,6 +381,7 @@ export function createStudentView({ onChange } = {}) {
           add(list, 'li', device && typeof device === 'object' ? `${safeText(device.label)} · ${deviceStatusText(device.status)}` : '확인 불가');
         }
         devicesBox.append(list);
+        if (devices.mode === 'demo') add(devicesBox, 'p', '기기 이름과 상태는 예시 값입니다. 이 PC에서 측정한 기기 상태가 아닙니다.');
       } else add(devicesBox, 'p', '확인 불가');
       root.append(devicesBox);
 
@@ -388,6 +400,7 @@ export function createStudentView({ onChange } = {}) {
           add(list, 'li', session && typeof session === 'object' ? `${safeText(session.id)} · ${sessionStatusText(session.status)}` : '확인 불가');
         }
         sessionsBox.append(list);
+        if (sessions.mode === 'demo') add(sessionsBox, 'p', '세션 ID와 상태는 예시 값입니다. 이 PC에서 측정한 연결이 아닙니다.');
       } else add(sessionsBox, 'p', '확인 불가');
       root.append(sessionsBox);
 
@@ -476,6 +489,7 @@ export function createStudentView({ onChange } = {}) {
       const guide = () => add(root, 'p', '이 칸에는 버튼이 없습니다. 조회와 취소는 제공 화면의 「설치 패키지 조회」, 「패키지 조회 취소」를 사용하세요.');
       if (status === 'idle') {
         add(root, 'p', '조회 전');
+        if (source.mode === 'demo') add(root, 'p', '예제 서버는 설치 패키지 예시를 미리 넣지 않습니다.');
         guide();
         return root;
       }
@@ -511,7 +525,10 @@ export function createStudentView({ onChange } = {}) {
         return root;
       }
       add(root, 'p', scanText);
-      if (dataStatus === 'not_configured') add(root, 'p', '조회 대상 프로젝트 설정이 필요합니다. 조회가 끝난 결과가 아닙니다.');
+      if (dataStatus === 'not_configured') {
+        add(root, 'p', '조회 대상 프로젝트 설정이 필요합니다. 조회가 끝난 결과가 아닙니다.');
+        add(root, 'p', '패키지 이름과 버전은 예시로 표시하지 않습니다.');
+      }
       if (dataStatus === 'not_checked') add(root, 'p', '승인된 공개 조회 대상이 없거나 아직 조회하지 않았습니다. 조회가 끝난 결과가 아닙니다.');
       if (dataStatus === 'unverifiable') add(root, 'p', 'lock 파일을 확인하지 못했습니다. 조회가 끝난 결과가 아닙니다.');
       if (dataStatus === 'partial') add(root, 'p', '일부 패키지 조회에 실패했습니다. 이미 받은 취약점 ID는 유지합니다.');
@@ -521,7 +538,10 @@ export function createStudentView({ onChange } = {}) {
       const checkedAt = safeTime(data.checkedAt);
       if (lockVersion) add(root, 'p', `lockfileVersion: ${lockVersion}`);
       if (lockHash) add(root, 'p', `lockfileHash: ${lockHash}`);
-      if (checkedAt) add(root, 'p', `checkedAt: ${checkedAt}`);
+      if (checkedAt) {
+        add(root, 'p', `checkedAt: ${checkedAt}`);
+        add(root, 'p', 'checkedAt은 이번 응답에서 받은 시각입니다. 취약점 조회 완료가 아닙니다.');
+      }
       add(root, 'p', 'version은 입력으로 받은 설치된 정확한 버전입니다. ^1.2.0 같은 범위 표기는 설치 버전이 아닙니다.');
       const list = document.createElement('ul');
       const seen = new Set();
@@ -562,8 +582,10 @@ export function createStudentView({ onChange } = {}) {
         }
         list.append(row);
       }
-      if (list.childNodes.length > 0) root.append(list);
-      else if (dataStatus === 'complete') add(root, 'p', '표시할 패키지 조회 결과가 없습니다.');
+      if (list.childNodes.length > 0) {
+        if (source.mode === 'demo') add(root, 'p', '아래 패키지 행은 예시 값입니다. 이 PC의 OSV 조회 완료가 아닙니다.');
+        root.append(list);
+      } else if (dataStatus === 'complete') add(root, 'p', '표시할 패키지 조회 결과가 없습니다.');
       guide();
       return root;
     },
