@@ -1,9 +1,44 @@
 // 이 파일은 학생이 같은 프로젝트에서 이어서 구현합니다.
 // 제공 UI를 받은 것만으로 단계 완료를 인정하지 않습니다.
-export function createStudentView({ onChange } = {}) {
+export function createStudentView({ api, onChange } = {}) {
   const eventFilters = { kind: 'all', app: 'all', access: 'all' };
   let selectedEventId = null;
   let eventsSeenKey = '';
+  let addedQuery = { status: 'idle' };
+  const refreshAddedQuery = async () => {
+    if (addedQuery.status === 'loading') return;
+    addedQuery = { status: 'loading' };
+    if (typeof onChange === 'function') onChange();
+    let next;
+    try {
+      if (!api || typeof api.get !== 'function') {
+        next = { status: 'error', error: { code: 'NOT_ALLOWED', message: '학생 조회 함수가 없습니다.' } };
+      } else {
+        const result = await api.get('/api/devices');
+        if (!result || result.ok !== true) {
+          const error = result && result.error && typeof result.error === 'object' ? result.error : {};
+          next = {
+            status: 'error',
+            error: {
+              code: typeof error.code === 'string' && error.code.length > 0 ? error.code : 'UNKNOWN_ERROR',
+              message: typeof error.message === 'string' ? error.message : '',
+            },
+          };
+        } else {
+          next = {
+            status: 'ok',
+            data: result.data,
+            mode: result.meta && typeof result.meta.mode === 'string' ? result.meta.mode : '',
+            checkedAt: result.meta && typeof result.meta.checkedAt === 'string' ? result.meta.checkedAt : '',
+          };
+        }
+      }
+    } catch {
+      next = { status: 'error', error: { code: 'UNKNOWN_ERROR', message: '' } };
+    }
+    addedQuery = next;
+    if (typeof onChange === 'function') onChange();
+  };
   return {
     renderIdentity(input) {
       const deviceStatusText = (status) => {
@@ -385,32 +420,6 @@ export function createStudentView({ onChange } = {}) {
       } else add(devicesBox, 'p', '확인 불가');
       root.append(devicesBox);
 
-      const resources = document.createElement('section');
-      add(resources, 'h3', '자원 사용량');
-      add(resources, 'p', '제공된 내 기기 응답에는 CPU 사용률, 메모리 사용량, 디스크 남은 공간이 없습니다. 예시 숫자는 표시하지 않습니다.');
-      add(resources, 'p', 'CPU 사용률: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      add(resources, 'p', '메모리 사용량: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      add(resources, 'p', '디스크 남은 공간: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      root.append(resources);
-
-      const local = document.createElement('section');
-      add(local, 'h3', 'PC 조회');
-      const mode = source.mode;
-      if (mode === 'connected') {
-        add(local, 'p', '제공 mode는 connected입니다. 이 표시는 PC 조회 결과가 아닙니다.');
-      } else {
-        add(local, 'p', 'SDP 미연결');
-        add(local, 'p', mode === 'demo'
-          ? '제공 mode는 demo입니다. 예제 데이터이며 PC 조회 성공이 아닙니다.'
-          : '제공 mode로는 SDP 연결을 확인하지 못했습니다. PC 조회 결과와 별개입니다.');
-      }
-      add(local, 'p', '아래 항목은 침해나 공격 탐지 결과가 아닙니다. 방화벽과 보안 설정은 바꾸지 않습니다.');
-      add(local, 'p', '네트워크 구성: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      add(local, 'p', '방화벽 설정: 확인 불가. 학생 화면 입력에 필드가 없습니다. 설정을 바꾸지 않습니다. 측정 시각: 확인 불가. 단위: 없음');
-      add(local, 'p', 'System 경고·오류 건수: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      add(local, 'p', 'Application 경고·오류 건수: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
-      root.append(local);
-
       const sessionsBox = document.createElement('section');
       add(sessionsBox, 'h3', '세션');
       add(sessionsBox, 'p', '세션은 지금 검증된 연결 하나만 표시합니다. 지난 세션 목록이 아닙니다.');
@@ -488,6 +497,70 @@ export function createStudentView({ onChange } = {}) {
       });
       help.append(copyButton);
       root.append(help);
+
+      const added = document.createElement('section');
+      added.setAttribute('aria-busy', addedQuery.status === 'loading' ? 'true' : 'false');
+      add(added, 'h3', '추가 조회');
+      add(added, 'p', '기기·세션·알림은 위에 있습니다. 아래는 제공 기기에 없는 항목이며 침해나 공격 탐지 결과가 아닙니다. 방화벽과 보안 설정은 바꾸지 않습니다.');
+      const requery = document.createElement('button');
+      requery.type = 'button';
+      requery.textContent = '다시 조회';
+      requery.disabled = addedQuery.status === 'loading';
+      requery.addEventListener('click', () => { refreshAddedQuery(); });
+      added.append(requery);
+      const queryStatus = document.createElement('p');
+      queryStatus.setAttribute('role', 'status');
+      added.append(queryStatus);
+      const mode = source.mode;
+      if (mode === 'connected') add(added, 'p', '제공 mode는 connected입니다. 이 표시는 PC 조회 결과가 아닙니다.');
+      else {
+        add(added, 'p', 'SDP 미연결');
+        add(added, 'p', mode === 'demo'
+          ? '제공 mode는 demo입니다. 예제 데이터이며 PC 조회 성공이 아닙니다.'
+          : '제공 mode로는 SDP 연결을 확인하지 못했습니다. PC 조회 결과와 별개입니다.');
+      }
+      const fields = [
+        ['CPU 사용률', 'cpu'],
+        ['메모리 사용량', 'memory'],
+        ['디스크 남은 공간', 'disk'],
+        ['네트워크 구성', 'network'],
+        ['방화벽 설정', 'firewall'],
+        ['System 경고·오류 건수', 'system'],
+        ['Application 경고·오류 건수', 'application'],
+      ];
+      const timeOk = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+      if (addedQuery.status === 'loading') {
+        queryStatus.textContent = '조회 중';
+        add(added, 'p', '이전 조회 결과는 현재 결과가 아닙니다.');
+      } else if (addedQuery.status === 'error') {
+        const code = addedQuery.error && typeof addedQuery.error.code === 'string' ? addedQuery.error.code : 'UNKNOWN_ERROR';
+        const message = addedQuery.error && typeof addedQuery.error.message === 'string' ? addedQuery.error.message : '';
+        queryStatus.textContent = '조회 실패';
+        add(added, 'p', '실패한 항목: /api/devices');
+        add(added, 'p', `error.code: ${safeText(code)}`);
+        if (message) add(added, 'p', `error.message: ${safeText(message)}`);
+        add(added, 'p', '다음에 할 일: 제공 화면의 「다시 불러오기」를 직접 누르세요.');
+        add(added, 'p', '예시 값은 표시하지 않습니다.');
+      } else {
+        queryStatus.textContent = addedQuery.status === 'ok' ? '조회 완료' : '아직 다시 조회하지 않았습니다.';
+        const rows = addedQuery.status === 'ok' && Array.isArray(addedQuery.data) ? addedQuery.data : [];
+        if (addedQuery.status === 'ok' && addedQuery.mode === 'demo') add(added, 'p', '이번 /api/devices 응답의 기기 이름과 상태는 예시 값입니다.');
+        if (addedQuery.status === 'ok' && timeOk(addedQuery.checkedAt)) add(added, 'p', `조회 시각: ${addedQuery.checkedAt}. 이번 응답에서 받은 값입니다.`);
+        for (const [label, key] of fields) {
+          const found = addedQuery.status === 'ok' ? rows.find((row) => row && typeof row === 'object' && Object.hasOwn(row, key)) : undefined;
+          const value = found ? found[key] : undefined;
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            add(added, 'p', `${label}: ${value}. 이번 응답에서 받은 값입니다. 단위: 응답에 없습니다.`);
+          } else if (addedQuery.status === 'ok') {
+            const extra = label === '방화벽 설정' ? ' 설정을 바꾸지 않습니다.' : '';
+            add(added, 'p', `${label}: 확인 불가. /api/devices 응답에 필드가 없습니다.${extra} 측정 시각: 확인 불가. 단위: 없음`);
+          } else {
+            add(added, 'p', `${label}: 확인 불가. 아직 다시 조회하지 않았습니다. 측정 시각: 확인 불가. 단위: 없음`);
+          }
+        }
+        if (addedQuery.status === 'ok') add(added, 'p', '다음에 할 일: 제공 기기에 없는 항목입니다. 예시 숫자를 넣지 않습니다.');
+      }
+      root.append(added);
       return root;
     },
     renderVulnerabilities(input) {
