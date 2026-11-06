@@ -393,6 +393,24 @@ export function createStudentView({ onChange } = {}) {
       add(resources, 'p', '디스크 남은 공간: 확인 불가. 제공 응답에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
       root.append(resources);
 
+      const local = document.createElement('section');
+      add(local, 'h3', 'PC 조회');
+      const mode = source.mode;
+      if (mode === 'connected') {
+        add(local, 'p', '제공 mode는 connected입니다. 이 표시는 PC 조회 결과가 아닙니다.');
+      } else {
+        add(local, 'p', 'SDP 미연결');
+        add(local, 'p', mode === 'demo'
+          ? '제공 mode는 demo입니다. 예제 데이터이며 PC 조회 성공이 아닙니다.'
+          : '제공 mode로는 SDP 연결을 확인하지 못했습니다. PC 조회 결과와 별개입니다.');
+      }
+      add(local, 'p', '아래 항목은 침해나 공격 탐지 결과가 아닙니다. 방화벽과 보안 설정은 바꾸지 않습니다.');
+      add(local, 'p', '네트워크 구성: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      add(local, 'p', '방화벽 설정: 확인 불가. 학생 화면 입력에 필드가 없습니다. 설정을 바꾸지 않습니다. 측정 시각: 확인 불가. 단위: 없음');
+      add(local, 'p', 'System 경고·오류 건수: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      add(local, 'p', 'Application 경고·오류 건수: 확인 불가. 학생 화면 입력에 필드가 없습니다. 측정 시각: 확인 불가. 단위: 없음');
+      root.append(local);
+
       const sessionsBox = document.createElement('section');
       add(sessionsBox, 'h3', '세션');
       add(sessionsBox, 'p', '세션은 지금 검증된 연결 하나만 표시합니다. 지난 세션 목록이 아닙니다.');
