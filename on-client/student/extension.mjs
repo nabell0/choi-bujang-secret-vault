@@ -602,6 +602,87 @@ export function createStudentView({ onChange } = {}) {
       }
       return root;
     },
-    renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
+    renderAction(input) {
+      const add = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const secret = /(?:bearer\s+\S+|sk-[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{8,}\.|api[_ -]?key|password|비밀번호|토큰|열쇠)/i;
+      const safeText = (value) => (typeof value === 'string' && value.length > 0 && value.length <= 1500 && !secret.test(value) ? value : '');
+      const safeCode = (value) => (typeof value === 'string' && /^[A-Z0-9_]{1,64}$/.test(value) ? value : '');
+      const safeId = (value) => (typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !secret.test(value) ? value : '');
+      const safeTime = (value) => (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : '');
+      const positiveInt = (value) => (Number.isSafeInteger(value) && value > 0 ? String(value) : '');
+      const source = input && typeof input === 'object' ? input : {};
+      const status = typeof source.status === 'string' ? source.status : '';
+      const event = source.event && typeof source.event === 'object' ? source.event : null;
+      const eventId = safeId(event && event.id);
+      const actionId = safeId(source.actionId);
+      const target = source.target && typeof source.target === 'object' ? source.target : null;
+      const targetId = safeId(target && target.id);
+      const generation = positiveInt(target && target.generation);
+      const receipt = source.receipt && typeof source.receipt === 'object' ? source.receipt : null;
+      const requestId = safeId(receipt && receipt.requestId);
+      const receiptId = safeId(receipt && receipt.receiptId);
+      const version = positiveInt(receipt && receipt.version);
+      const observation = source.observation && typeof source.observation === 'object' ? source.observation : null;
+      const observedAt = safeTime(observation && observation.observedAt);
+      const effectApplied = observation ? observation.effectApplied === true : false;
+      const expiresAt = safeTime(source.confirmationExpiresAt);
+      const note = safeText(source.message);
+      const error = source.error && typeof source.error === 'object' ? source.error : null;
+      const errorCode = safeCode(error && error.code);
+      const errorMessage = safeText(error && error.message);
+      const evidenceIds = [];
+      if (event && Array.isArray(event.evidence)) {
+        for (const item of event.evidence) {
+          const id = safeId(item && item.id);
+          if (id && !evidenceIds.includes(id)) evidenceIds.push(id);
+        }
+      }
+      const confirmed = status === 'succeeded' && effectApplied && Boolean(observedAt) && Boolean(receiptId);
+      const root = document.createElement('div');
+      if (eventId) root.setAttribute('data-student-action-event', eventId);
+      if (requestId) root.setAttribute('data-student-action-request', requestId);
+      let lead = '결과 불명. 계약에 있는 status가 아닙니다. 성공으로도 효과 없음으로도 단정하지 마세요. 제공 화면의 「원천 결과만 재조회」로 결과만 다시 조회하세요.';
+      if (status === 'idle') lead = '아직 미실행(idle). 조치 제안은 실행되지 않았습니다.';
+      else if (status === 'loading') lead = '조치 준비 또는 결과 조회 중(loading). 결과가 아직 없습니다. 완료 아님.';
+      else if (status === 'prepared') lead = '준비됨·미실행(prepared). 사람 확인이 필요하며 아직 실행되지 않았습니다.';
+      else if (status === 'executing') lead = '서버에 전달 중(executing). 결과가 아직 없습니다. 완료 아님.';
+      else if (status === 'pending') lead = '서버 접수·처리 중(pending). 서버가 받았다는 것(ACK)은 효과가 아닙니다. 결과가 아직 확인되지 않았습니다. 완료 아님.';
+      else if (confirmed) lead = '효과 확인(succeeded).';
+      else if (status === 'succeeded') lead = '결과 불명. 받은 status는 succeeded이나 적용 관측 조건이 맞지 않습니다. 성공으로도 효과 없음으로도 단정하지 마세요. 제공 화면의 「원천 결과만 재조회」로 결과만 다시 조회하세요.';
+      else if (status === 'denied') lead = '거절(denied).';
+      else if (status === 'failed') lead = '실패(failed).';
+      else if (status === 'unknown') lead = '결과 불명(unknown). 효과 없음으로도 성공으로도 단정하지 마세요. 제공 화면의 「원천 결과만 재조회」로 결과만 다시 조회하세요.';
+      else if (status === 'expired') lead = '확인 기한 지남(expired). 다시 준비하세요.';
+      else if (status === 'error') lead = '요청 처리 안 됨(error).';
+      add(root, 'p', lead);
+      if (eventId) add(root, 'p', `사건 ID: ${eventId}`);
+      for (const id of evidenceIds) add(root, 'p', `근거 ID: ${id}`);
+      if (actionId) add(root, 'p', `actionId: ${actionId}`);
+      if (targetId) add(root, 'p', `대상 ID: ${targetId}`);
+      if (generation) add(root, 'p', `generation: ${generation}`);
+      if (requestId) add(root, 'p', `requestId: ${requestId}`);
+      if (receiptId) add(root, 'p', `receiptId: ${receiptId}`);
+      if (version) add(root, 'p', `version: ${version}`);
+      if (expiresAt) add(root, 'p', `확인 기한: ${expiresAt}`);
+      else if (status === 'prepared' || status === 'expired') add(root, 'p', '확인 기한: 입력에 없습니다.');
+      if (confirmed) {
+        add(root, 'p', `관측 시각: ${observedAt}`);
+        add(root, 'p', 'effectApplied: true');
+      }
+      if (status === 'prepared') add(root, 'p', '제공 화면에서 실제 대상과 확인 기한을 읽고 사람 확인을 해야 합니다. 이 상태는 실행 전입니다.');
+      if (status === 'expired') add(root, 'p', '제공 화면에서 조치를 다시 준비하세요.');
+      if (note && (status === 'idle' || status === 'loading' || status === 'executing' || status === 'pending' || status === 'denied' || status === 'failed')) add(root, 'p', `message: ${note}`);
+      if (errorCode && (status === 'denied' || status === 'failed' || status === 'unknown' || status === 'expired' || status === 'error')) add(root, 'p', `error.code: ${errorCode}`);
+      if (errorMessage && (status === 'denied' || status === 'failed' || status === 'unknown' || status === 'expired' || status === 'error')) add(root, 'p', `error.message: ${errorMessage}`);
+      else if (status === 'error') add(root, 'p', 'error.message: 확인할 수 없습니다.');
+      if (status === 'idle') add(root, 'p', '조치 화면 취소는 이 화면의 표시를 지웁니다. 이미 서버에 전달된 조치 효과를 되돌리지 않습니다.');
+      add(root, 'p', '이 칸에는 버튼이 없습니다. 아래 이름은 제공 화면의 버튼이며 현재 상태가 아닙니다. 「조치 준비」, 「대상과 조치를 확인했으며 집행합니다」, 「원천 결과만 재조회」, 「조치 화면 취소」.');
+      return root;
+    },
   };
 }
