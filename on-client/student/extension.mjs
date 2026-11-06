@@ -451,7 +451,122 @@ export function createStudentView({ onChange } = {}) {
       root.append(help);
       return root;
     },
-    renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
+    renderVulnerabilities(input) {
+      const add = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const secret = /(?:bearer\s+\S+|sk-[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{8,}\.|api[_ -]?key|password|비밀번호|토큰|열쇠)/i;
+      const safeText = (value) => (typeof value === 'string' && value.length > 0 && value.length <= 1500 && !secret.test(value) ? value : '');
+      const safeCode = (value) => (typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : '');
+      const safeTime = (value) => (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : '');
+      const packageName = (value) => (typeof value === 'string' && value.length <= 214 && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(value) && !secret.test(value) ? value : '');
+      const exactVersion = (value) => (typeof value === 'string' && value.length <= 100 && !secret.test(value) && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value) ? value : '');
+      const findingId = (value) => {
+        if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value) || secret.test(value)) return '';
+        if (/^CVE-/i.test(value)) return /^CVE-\d{4}-\d{4,}$/.test(value) ? value : '';
+        if (/^GHSA-/i.test(value)) return /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/.test(value) ? value : '';
+        return value;
+      };
+      const source = input && typeof input === 'object' ? input : {};
+      const status = typeof source.status === 'string' ? source.status : '';
+      const root = document.createElement('div');
+      const guide = () => add(root, 'p', '이 칸에는 버튼이 없습니다. 조회와 취소는 제공 화면의 「설치 패키지 조회」, 「패키지 조회 취소」를 사용하세요.');
+      if (status === 'idle') {
+        add(root, 'p', '조회 전');
+        guide();
+        return root;
+      }
+      if (status === 'loading') {
+        add(root, 'p', '조회 중');
+        add(root, 'p', '이전 조회 표는 현재 결과가 아닙니다.');
+        guide();
+        return root;
+      }
+      if (status !== 'ok') {
+        const error = source.error && typeof source.error === 'object' ? source.error : null;
+        const code = safeCode(error && error.code);
+        const message = safeText(error && error.message);
+        add(root, 'p', message ? `조회 실패: ${message}` : '조회 실패: 확인할 수 없습니다.');
+        if (code) add(root, 'p', `error.code: ${code}`);
+        add(root, 'p', '이전 조회 표는 현재 결과가 아닙니다.');
+        guide();
+        return root;
+      }
+      const data = source.data && typeof source.data === 'object' && !Array.isArray(source.data) ? source.data : null;
+      const dataStatus = data && typeof data.status === 'string' ? data.status : '';
+      const scanText = {
+        complete: '모두 조회(complete)',
+        partial: '일부 조회 실패(partial)',
+        not_checked: '아직 조회 안 함(not_checked)',
+        not_configured: '조회 준비 미완료(not_configured)',
+        unverifiable: 'lock 파일 확인 불가(unverifiable)',
+      }[dataStatus];
+      if (!scanText) {
+        add(root, 'p', '조회 실패: 전체 조회 상태를 확인할 수 없습니다.');
+        add(root, 'p', '이전 조회 표는 현재 결과가 아닙니다.');
+        guide();
+        return root;
+      }
+      add(root, 'p', scanText);
+      if (dataStatus === 'not_configured') add(root, 'p', '조회 대상 프로젝트 설정이 필요합니다. 조회가 끝난 결과가 아닙니다.');
+      if (dataStatus === 'not_checked') add(root, 'p', '승인된 공개 조회 대상이 없거나 아직 조회하지 않았습니다. 조회가 끝난 결과가 아닙니다.');
+      if (dataStatus === 'unverifiable') add(root, 'p', 'lock 파일을 확인하지 못했습니다. 조회가 끝난 결과가 아닙니다.');
+      if (dataStatus === 'partial') add(root, 'p', '일부 패키지 조회에 실패했습니다. 이미 받은 취약점 ID는 유지합니다.');
+      if (dataStatus === 'complete') add(root, 'p', '승인된 공개 패키지의 이번 조회가 모두 끝났습니다.');
+      const lockVersion = data.lockfileVersion === 2 || data.lockfileVersion === 3 ? String(data.lockfileVersion) : '';
+      const lockHash = typeof data.lockfileHash === 'string' && /^[0-9a-f]{64}$/.test(data.lockfileHash) ? data.lockfileHash : '';
+      const checkedAt = safeTime(data.checkedAt);
+      if (lockVersion) add(root, 'p', `lockfileVersion: ${lockVersion}`);
+      if (lockHash) add(root, 'p', `lockfileHash: ${lockHash}`);
+      if (checkedAt) add(root, 'p', `checkedAt: ${checkedAt}`);
+      add(root, 'p', 'version은 입력으로 받은 설치된 정확한 버전입니다. ^1.2.0 같은 범위 표기는 설치 버전이 아닙니다.');
+      const list = document.createElement('ul');
+      const seen = new Set();
+      for (const item of Array.isArray(data.packages) ? data.packages : []) {
+        if (!item || typeof item !== 'object') continue;
+        const name = packageName(item.name);
+        const version = exactVersion(item.version);
+        if (!name || !version || seen.has(`${name}\0${version}`)) continue;
+        seen.add(`${name}\0${version}`);
+        const findings = [];
+        const ids = new Set();
+        for (const finding of Array.isArray(item.vulnerabilities) ? item.vulnerabilities : []) {
+          const id = findingId(finding && finding.id);
+          const modified = safeTime(finding && finding.modified);
+          if (!id || !modified || ids.has(id)) continue;
+          ids.add(id);
+          findings.push({ id, modified });
+        }
+        let rowStatus = '';
+        if (item.status === 'known_vulnerabilities' && findings.length > 0) rowStatus = '알려진 항목 있음(known_vulnerabilities)';
+        else if (item.status === 'none_found' && findings.length === 0) rowStatus = '알려진 항목 없음(none_found). 이번 조회 범위에서 알려진 항목이 없습니다.';
+        else if (item.status === 'unverifiable' && findings.length > 0) rowStatus = '일부 확인·전체 조회 확인 불가(unverifiable)';
+        else if (item.status === 'unverifiable') rowStatus = '조회 확인 불가(unverifiable)';
+        else continue;
+        const sourceUrl = item.source === 'https://api.osv.dev/v1/querybatch' ? item.source : '';
+        const rowCheckedAt = safeTime(item.checkedAt);
+        const row = document.createElement('li');
+        row.setAttribute('data-student-package-name', name);
+        row.setAttribute('data-student-package-version', version);
+        add(row, 'p', `name: ${name}`);
+        add(row, 'p', `version: ${version}`);
+        add(row, 'p', rowStatus);
+        add(row, 'p', sourceUrl ? `source: ${sourceUrl}` : 'source: 확인 불가');
+        add(row, 'p', rowCheckedAt ? `checkedAt: ${rowCheckedAt}` : 'checkedAt: 확인 불가');
+        for (const finding of findings) {
+          add(row, 'p', `id: ${finding.id}`);
+          add(row, 'p', `modified: ${finding.modified}`);
+        }
+        list.append(row);
+      }
+      if (list.childNodes.length > 0) root.append(list);
+      else if (dataStatus === 'complete') add(root, 'p', '표시할 패키지 조회 결과가 없습니다.');
+      guide();
+      return root;
+    },
     renderAiConnection(input) {
       const add = (parent, tag, text) => {
         const node = document.createElement(tag);
